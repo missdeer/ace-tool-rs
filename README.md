@@ -92,6 +92,27 @@ Add to your Claude Desktop configuration file:
 }
 ```
 
+### Claude Code
+
+Run command like below:
+
+```bash
+claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"/path/to/ace-tool-rs","args":["--base-url",  "https://api.example.com/",  "--token", "your-token-here"],"env":{}}'
+```
+
+Modify `~/.claude/settings.json` to add permission for the tool:
+
+```json
+$ cat settings.local.json
+{
+  "permissions": {
+    "allow": [
+      "mcp__ace-tool__search_context"
+    ]
+  }
+}
+```
+
 ### Available Tools
 
 #### `search_context`
