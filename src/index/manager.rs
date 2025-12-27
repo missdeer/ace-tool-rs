@@ -2,9 +2,14 @@
 
 use std::collections::HashSet;
 use std::fs;
+#[cfg(windows)]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 
 use anyhow::{anyhow, Result};
 use encoding_rs::{GB18030, GBK, UTF_8, WINDOWS_1252};
@@ -248,9 +253,9 @@ impl IndexManager {
         Ok(())
     }
 
-    /// Read file with encoding detection
+    /// Read file with encoding detection (avoids updating file access time on Windows)
     fn read_file_with_encoding(path: &Path) -> Result<String> {
-        let bytes = fs::read(path)?;
+        let bytes = Self::read_file_bytes(path)?;
 
         // Try different encodings
         let encodings = [UTF_8, GBK, GB18030, WINDOWS_1252];
@@ -275,6 +280,28 @@ impl IndexManager {
 
         // Fallback to UTF-8 with lossy conversion
         Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    /// Read file bytes without updating access time on Windows
+    #[cfg(windows)]
+    fn read_file_bytes(path: &Path) -> Result<Vec<u8>> {
+        // FILE_FLAG_BACKUP_SEMANTICS (0x02000000) avoids updating access time
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)?;
+
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    /// Read file bytes (non-Windows platforms)
+    #[cfg(not(windows))]
+    fn read_file_bytes(path: &Path) -> Result<Vec<u8>> {
+        Ok(fs::read(path)?)
     }
 
     /// Calculate blob name (SHA-256 hash)
