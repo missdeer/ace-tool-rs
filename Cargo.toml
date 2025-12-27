@@ -1,0 +1,64 @@
+[package]
+name = "ace-tool-rs"
+version = "0.1.0"
+edition = "2021"
+description = "MCP server for codebase indexing and semantic search"
+license = "MIT"
+authors = ["missdeer"]
+repository = "https://github.com/missdeer/ace-tool-rs.git"
+
+[lib]
+name = "ace_tool"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ace-tool-rs"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Cryptography (SHA-256)
+sha2 = "0.10"
+
+# Gitignore support
+ignore = "0.4"
+
+# Encoding detection and conversion
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async utilities
+futures = "0.3"
+
+# File system utilities
+walkdir = "2"
+
+# Regex for pattern matching
+regex = "1"
+
+# Hex encoding
+hex = "0.4"
+
+[dev-dependencies]
+# Temporary directories for tests
+tempfile = "3"

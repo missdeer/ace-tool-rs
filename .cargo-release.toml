@@ -1,0 +1,11 @@
+# Configuration for cargo-release
+# See: https://github.com/crate-ci/cargo-release
+
+[workspace]
+allow-branch = ["master"]
+pre-release-commit-message = "chore: release v{{version}}"
+post-release-commit-message = "chore: prepare for next development iteration"
+tag-message = "chore: release v{{version}}"
+tag-prefix = "v"
+tag-name = "v{{version}}"
+enable-all-features = true

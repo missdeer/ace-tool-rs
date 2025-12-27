@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write # Required for NPM OIDC
+
+jobs:
+  build-release:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact_name: ace-tool-rs
+            asset_name: ace-tool-rs_Linux_x86_64.tar.gz
+            universal: false
+          # macOS universal (x86_64 + aarch64)
+          - target: universal-apple-darwin
+            os: macos-latest
+            artifact_name: ace-tool-rs
+            asset_name: ace-tool-rs_Darwin_universal.tar.gz
+            universal: true
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: ace-tool-rs.exe
+            asset_name: ace-tool-rs_Windows_x86_64.zip
+            universal: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (Universal)
+        if: matrix.universal == true
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Setup Rust (Single Target)
+        if: matrix.universal != true
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        if: matrix.universal != true
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build Universal Binary (macOS)
+        if: matrix.universal == true
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          lipo -create -output target/release/${{ matrix.artifact_name }} \
+            target/x86_64-apple-darwin/release/${{ matrix.artifact_name }} \
+            target/aarch64-apple-darwin/release/${{ matrix.artifact_name }}
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          if [ "${{ matrix.universal }}" == "true" ]; then
+            cd target/release
+            strip ${{ matrix.artifact_name }}
+            tar czf ../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
+          else
+            cd target/${{ matrix.target }}/release
+            strip ${{ matrix.artifact_name }}
+            tar czf ../../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
+          fi
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ../../../${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  create-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  publish-npm:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Extract tag version
+        id: version
+        run: echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package.json version matches tag
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.value }}"
+          PACKAGE_VERSION=$(node -p "require('./npm/package.json').version")
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version (${TAG_VERSION}) does not match npm/package.json version (${PACKAGE_VERSION})."
+            exit 1
+          fi
+
+      - name: Sync server.json version with tag
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          tmpfile=$(mktemp)
+          jq --arg v "$VERSION" '
+            .version = $v |
+            .packages = (.packages // []) |
+            .packages |= map(.version = $v)
+          ' server.json > "$tmpfile"
+          mv "$tmpfile" server.json
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish --file server.json
