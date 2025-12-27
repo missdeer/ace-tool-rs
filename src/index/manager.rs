@@ -355,7 +355,9 @@ impl IndexManager {
         for entry in WalkDir::new(&self.project_root)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| !self.should_exclude(e.path(), e.file_type().is_dir(), gitignore.as_ref()))
+            .filter_entry(|e| {
+                !self.should_exclude(e.path(), e.file_type().is_dir(), gitignore.as_ref())
+            })
         {
             let entry = match entry {
                 Ok(e) => e,
