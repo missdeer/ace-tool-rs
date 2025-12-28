@@ -52,6 +52,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install musl-tools 
+        if: matrix.target == x86_64-unknown-linux-musl
+        run: sudo apt update; sudo apt install musl-tools
+
       - name: Build
         if: matrix.universal != true
         run: cargo build --release --target ${{ matrix.target }}
