@@ -297,5 +297,8 @@ fn test_transport_mode_unwrap_or_default() {
     fn get_mode() -> Option<TransportMode> {
         None
     }
-    assert_eq!(get_mode().unwrap_or(TransportMode::Line), TransportMode::Line);
+    assert_eq!(
+        get_mode().unwrap_or(TransportMode::Line),
+        TransportMode::Line
+    );
 }
