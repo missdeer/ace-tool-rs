@@ -153,7 +153,7 @@ async fn write_message(
     payload: &str,
 ) -> Result<()> {
     let mut buffer = Vec::new();
-    
+
     match mode {
         TransportMode::Line => {
             buffer.extend_from_slice(payload.as_bytes());
@@ -272,7 +272,7 @@ impl McpServer {
             protocol_version: "2024-11-05".to_string(),
             capabilities: ServerCapabilities {
                 tools: Some(ToolsCapability {}),
-                logging: Some(LoggingCapability {}),
+                logging: None,
             },
             server_info: ServerInfo {
                 name: "ace-tool".to_string(),
@@ -431,15 +431,27 @@ mod tests {
     // Tests for parse_content_length function
     #[test]
     fn test_parse_content_length_valid() {
-        assert_eq!(parse_content_length("Content-Length: 123").unwrap(), Some(123));
+        assert_eq!(
+            parse_content_length("Content-Length: 123").unwrap(),
+            Some(123)
+        );
         assert_eq!(parse_content_length("content-length: 0").unwrap(), Some(0));
-        assert_eq!(parse_content_length("CONTENT-LENGTH:456").unwrap(), Some(456));
-        assert_eq!(parse_content_length("Content-Length:  789  ").unwrap(), Some(789));
+        assert_eq!(
+            parse_content_length("CONTENT-LENGTH:456").unwrap(),
+            Some(456)
+        );
+        assert_eq!(
+            parse_content_length("Content-Length:  789  ").unwrap(),
+            Some(789)
+        );
     }
 
     #[test]
     fn test_parse_content_length_not_content_length() {
-        assert_eq!(parse_content_length("Content-Type: application/json").unwrap(), None);
+        assert_eq!(
+            parse_content_length("Content-Type: application/json").unwrap(),
+            None
+        );
         assert_eq!(parse_content_length("X-Custom: 123").unwrap(), None);
         assert_eq!(parse_content_length("no colon here").unwrap(), None);
     }

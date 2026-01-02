@@ -1,8 +1,8 @@
 //! Tests for MCP types module
 
 use ace_tool::mcp::types::*;
-use serde_json::json;
 use ace_tool::mcp::TransportMode;
+use serde_json::json;
 
 #[test]
 fn test_json_rpc_request_serialization() {
