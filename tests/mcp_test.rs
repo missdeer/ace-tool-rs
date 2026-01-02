@@ -267,6 +267,7 @@ fn test_transport_mode_is_copy() {
 #[test]
 fn test_transport_mode_is_clone() {
     let mode1 = TransportMode::Line;
+    #[allow(clippy::clone_on_copy)]
     let mode2 = mode1.clone();
     assert_eq!(mode1, mode2);
 }
@@ -287,13 +288,14 @@ fn test_transport_mode_in_option() {
     assert!(some_line.is_some());
     assert!(none.is_none());
 
-    assert_eq!(some_lsp.unwrap(), TransportMode::Lsp);
-    assert_eq!(some_line.unwrap(), TransportMode::Line);
+    assert_eq!(some_lsp, Some(TransportMode::Lsp));
+    assert_eq!(some_line, Some(TransportMode::Line));
 }
 
 #[test]
 fn test_transport_mode_unwrap_or_default() {
-    let none: Option<TransportMode> = None;
-    let default = none.unwrap_or(TransportMode::Line);
-    assert_eq!(default, TransportMode::Line);
+    fn get_mode() -> Option<TransportMode> {
+        None
+    }
+    assert_eq!(get_mode().unwrap_or(TransportMode::Line), TransportMode::Line);
 }
