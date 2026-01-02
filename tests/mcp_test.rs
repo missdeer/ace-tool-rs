@@ -2,6 +2,7 @@
 
 use ace_tool::mcp::types::*;
 use serde_json::json;
+use ace_tool::mcp::TransportMode;
 
 #[test]
 fn test_json_rpc_request_serialization() {
@@ -240,4 +241,59 @@ fn test_json_rpc_error_codes() {
     // Invalid params
     let response = JsonRpcResponse::error(None, -32602, "Invalid params".to_string());
     assert_eq!(response.error.as_ref().unwrap().code, -32602);
+}
+// Tests for TransportMode enum
+#[test]
+fn test_transport_mode_lsp_variant() {
+    let mode = TransportMode::Lsp;
+    assert_eq!(mode, TransportMode::Lsp);
+    assert_ne!(mode, TransportMode::Line);
+}
+
+#[test]
+fn test_transport_mode_line_variant() {
+    let mode = TransportMode::Line;
+    assert_eq!(mode, TransportMode::Line);
+    assert_ne!(mode, TransportMode::Lsp);
+}
+
+#[test]
+fn test_transport_mode_is_copy() {
+    let mode1 = TransportMode::Lsp;
+    let mode2 = mode1; // Copy
+    assert_eq!(mode1, mode2);
+}
+
+#[test]
+fn test_transport_mode_is_clone() {
+    let mode1 = TransportMode::Line;
+    let mode2 = mode1.clone();
+    assert_eq!(mode1, mode2);
+}
+
+#[test]
+fn test_transport_mode_debug_format() {
+    assert_eq!(format!("{:?}", TransportMode::Lsp), "Lsp");
+    assert_eq!(format!("{:?}", TransportMode::Line), "Line");
+}
+
+#[test]
+fn test_transport_mode_in_option() {
+    let some_lsp: Option<TransportMode> = Some(TransportMode::Lsp);
+    let some_line: Option<TransportMode> = Some(TransportMode::Line);
+    let none: Option<TransportMode> = None;
+
+    assert!(some_lsp.is_some());
+    assert!(some_line.is_some());
+    assert!(none.is_none());
+
+    assert_eq!(some_lsp.unwrap(), TransportMode::Lsp);
+    assert_eq!(some_line.unwrap(), TransportMode::Line);
+}
+
+#[test]
+fn test_transport_mode_unwrap_or_default() {
+    let none: Option<TransportMode> = None;
+    let default = none.unwrap_or(TransportMode::Line);
+    assert_eq!(default, TransportMode::Line);
 }

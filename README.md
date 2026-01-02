@@ -55,6 +55,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 |----------|-------------|
 | `--base-url` | API base URL for the indexing service |
 | `--token` | Authentication token for API access |
+| `--transport` | Transport framing: `auto` (default), `lsp`, `line` |
 
 ### Environment Variables
 
@@ -69,7 +70,28 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 RUST_LOG=debug ace-tool-rs --base-url https://api.example.com --token your-token-here
 ```
 
+### Transport Framing
+
+By default, the server auto-detects line-delimited JSON vs. LSP `Content-Length` framing.
+If your client requires a specific mode, force it:
+
+```bash
+ace-tool-rs --base-url https://api.example.com --token your-token-here --transport lsp
+```
+
 ## MCP Integration
+
+### Codex CLI Configuration
+
+Add to your Codex config file (typically `~/.codex/config.toml`):
+
+```toml
+[mcp_servers.ace-tool]
+command = "/path/to/ace-tool-rs"
+args = ["--base-url", "https://api.example.com", "--token", "your-token-here", "--transport", "lsp"]
+env = { RUST_LOG = "info" }
+startup_timeout_ms = 60000
+```
 
 ### Claude Desktop Configuration
 

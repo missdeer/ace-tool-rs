@@ -1,11 +1,18 @@
 //! ace-tool - MCP server for codebase indexing and semantic search
 
 use ace_tool::config::Config;
-use ace_tool::mcp::McpServer;
+use ace_tool::mcp::{McpServer, TransportMode};
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(ValueEnum, Debug, Copy, Clone)]
+enum TransportArg {
+    Auto,
+    Lsp,
+    Line,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "ace-tool")]
@@ -18,6 +25,10 @@ struct Args {
     /// Authentication token
     #[arg(long)]
     token: String,
+
+    /// Transport framing: auto, lsp, line
+    #[arg(long, value_enum, default_value = "auto")]
+    transport: TransportArg,
 }
 
 #[tokio::main]
@@ -35,8 +46,14 @@ async fn main() -> Result<()> {
 
     info!("Starting ace-tool MCP server");
 
+    let transport_mode = match args.transport {
+        TransportArg::Auto => None,
+        TransportArg::Lsp => Some(TransportMode::Lsp),
+        TransportArg::Line => Some(TransportMode::Line),
+    };
+
     // Create and run MCP server
-    let server = McpServer::new(config);
+    let server = McpServer::new(config, transport_mode);
 
     if let Err(e) = server.run().await {
         error!("Server error: {}", e);

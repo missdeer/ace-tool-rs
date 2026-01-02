@@ -3,4 +3,4 @@
 mod server;
 pub mod types;
 
-pub use server::McpServer;
+pub use server::{McpServer, TransportMode};
