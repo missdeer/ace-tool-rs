@@ -276,7 +276,7 @@ impl McpServer {
             },
             server_info: ServerInfo {
                 name: "ace-tool".to_string(),
-                version: "0.1.1".to_string(),
+                version: "0.1.2".to_string(),
             },
         };
 
