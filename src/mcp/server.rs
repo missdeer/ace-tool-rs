@@ -13,6 +13,14 @@ use crate::tools::enhance_prompt::{EnhancePromptArgs, EnhancePromptToolDef, ENHA
 use crate::tools::search_context::{SearchContextArgs, SearchContextToolDef, SEARCH_CONTEXT_TOOL};
 use crate::tools::{EnhancePromptTool, SearchContextTool};
 
+/// Map tool name aliases to canonical names
+fn normalize_tool_name(name: &str) -> &str {
+    match name {
+        "codebase-retrieval" => "search_context",
+        _ => name,
+    }
+}
+
 use super::types::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -379,7 +387,9 @@ impl McpServer {
             }
         };
 
-        match call_params.name.as_str() {
+        let tool_name = normalize_tool_name(&call_params.name);
+
+        match tool_name {
             "search_context" => {
                 let args: SearchContextArgs = match call_params.arguments {
                     Some(args) => match serde_json::from_value(args) {
@@ -620,8 +630,8 @@ mod tests {
     fn test_header_count_limit() {
         // Just verify the constant is set reasonably
         // Testing the actual async function logic would require mocking stdin which is complex
-        assert!(MAX_HEADER_COUNT >= 10);
-        assert!(MAX_HEADER_COUNT <= 1000);
+        const { assert!(MAX_HEADER_COUNT >= 10) };
+        const { assert!(MAX_HEADER_COUNT <= 1000) };
     }
 
     // Tests for header line edge cases
