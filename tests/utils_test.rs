@@ -79,6 +79,28 @@ fn test_get_ace_dir_does_not_duplicate_in_gitignore() {
 }
 
 #[test]
+fn test_get_ace_dir_ignores_similar_gitignore_entries() {
+    let temp_dir = TempDir::new().unwrap();
+    let gitignore_path = temp_dir.path().join(".gitignore");
+
+    // .ace-tooling should not block adding .ace-tool/
+    fs::write(&gitignore_path, ".ace-tooling/\n").unwrap();
+
+    get_ace_dir(temp_dir.path());
+
+    let content = fs::read_to_string(&gitignore_path).unwrap();
+    assert!(content.contains(".ace-tool/"));
+    let count = content
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            line == ".ace-tool" || line == ".ace-tool/"
+        })
+        .count();
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn test_get_ace_dir_handles_gitignore_without_trailing_newline() {
     let temp_dir = TempDir::new().unwrap();
     let gitignore_path = temp_dir.path().join(".gitignore");

@@ -59,6 +59,17 @@ regex = "1"
 # Hex encoding
 hex = "0.4"
 
+# UUID for session management
+uuid = { version = "1", features = ["v4"] }
+
+# HTTP server for Web UI
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1"] }
+http-body-util = "0.1"
+
+# Browser opening
+open = "5"
+
 [dev-dependencies]
 # Temporary directories for tests
 tempfile = "3"

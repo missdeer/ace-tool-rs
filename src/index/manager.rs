@@ -463,9 +463,38 @@ impl IndexManager {
         Ok(blobs)
     }
 
+    /// Build batches that respect both count and size limits
+    fn build_batches(&self, blobs: Vec<Blob>, max_blobs_per_batch: usize) -> Vec<Vec<Blob>> {
+        let max_blobs_per_batch = max_blobs_per_batch.max(1);
+        let mut batches = Vec::new();
+        let mut current = Vec::new();
+        let mut current_size = 0usize;
+
+        for blob in blobs {
+            let blob_size = blob.content.len() + blob.path.len();
+            let would_exceed_size = current_size + blob_size > MAX_BATCH_SIZE;
+            let would_exceed_count = current.len() >= max_blobs_per_batch;
+
+            if !current.is_empty() && (would_exceed_size || would_exceed_count) {
+                batches.push(current);
+                current = Vec::new();
+                current_size = 0;
+            }
+
+            current_size += blob_size;
+            current.push(blob);
+        }
+
+        if !current.is_empty() {
+            batches.push(current);
+        }
+
+        batches
+    }
+
     /// Upload a batch of blobs with retry
     async fn upload_batch(&self, blobs: &[Blob], timeout_ms: u64) -> Result<Vec<String>> {
-        let batch_size: usize = blobs.iter().map(|b| b.content.len()).sum();
+        let batch_size: usize = blobs.iter().map(|b| b.content.len() + b.path.len()).sum();
         if batch_size > MAX_BATCH_SIZE {
             return Err(anyhow!("Batch too large: {}MB", batch_size / 1024 / 1024));
         }
@@ -638,14 +667,12 @@ impl IndexManager {
             );
 
             // Upload in batches
-            let batches: Vec<Vec<Blob>> = blobs_to_upload
-                .chunks(strategy.batch_size)
-                .map(|c| c.to_vec())
-                .collect();
+            let blobs_count = blobs_to_upload.len();
+            let batches = self.build_batches(blobs_to_upload, strategy.batch_size);
 
             info!(
                 "Uploading {} new chunks in {} batches (concurrency: {})",
-                blobs_to_upload.len(),
+                blobs_count,
                 batches.len(),
                 strategy.concurrency
             );

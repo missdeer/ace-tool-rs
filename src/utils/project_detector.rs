@@ -34,7 +34,7 @@ fn add_to_gitignore(project_root: &Path) {
     };
 
     // Check if already included
-    if content.contains(".ace-tool") {
+    if gitignore_has_ace_tool(&content) {
         return;
     }
 
@@ -48,6 +48,17 @@ fn add_to_gitignore(project_root: &Path) {
     if let Err(e) = fs::write(&gitignore_path, new_content) {
         tracing::warn!("Failed to update .gitignore: {}", e);
     }
+}
+
+fn gitignore_has_ace_tool(content: &str) -> bool {
+    content.lines().any(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return false;
+        }
+        let entry = line.split('#').next().unwrap_or(line).trim();
+        entry == ".ace-tool" || entry == ".ace-tool/"
+    })
 }
 
 /// Get index file path

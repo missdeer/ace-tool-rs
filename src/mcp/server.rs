@@ -9,8 +9,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
 use crate::config::Config;
+use crate::tools::enhance_prompt::{EnhancePromptArgs, EnhancePromptToolDef, ENHANCE_PROMPT_TOOL};
 use crate::tools::search_context::{SearchContextArgs, SearchContextToolDef, SEARCH_CONTEXT_TOOL};
-use crate::tools::SearchContextTool;
+use crate::tools::{EnhancePromptTool, SearchContextTool};
 
 use super::types::*;
 
@@ -47,12 +48,24 @@ fn parse_content_length(line: &str) -> Result<Option<usize>> {
     Ok(Some(length))
 }
 
+/// Maximum line length for Line mode to prevent DoS (10MB)
+const MAX_LINE_LENGTH: usize = 10 * 1024 * 1024;
+
 async fn read_line_message(reader: &mut BufReader<tokio::io::Stdin>) -> Result<Option<String>> {
     loop {
         let mut line = String::new();
         let bytes = reader.read_line(&mut line).await?;
         if bytes == 0 {
             return Ok(None);
+        }
+
+        // Protect against DoS from extremely long lines
+        if line.len() > MAX_LINE_LENGTH {
+            return Err(anyhow!(
+                "Line length {} exceeds maximum allowed size of {} bytes",
+                line.len(),
+                MAX_LINE_LENGTH
+            ));
         }
 
         let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
@@ -64,6 +77,11 @@ async fn read_line_message(reader: &mut BufReader<tokio::io::Stdin>) -> Result<O
     }
 }
 
+/// Maximum header line length for LSP mode to prevent DoS (1KB should be enough for headers)
+const MAX_HEADER_LENGTH: usize = 1024;
+/// Maximum number of header lines (including skipped blank lines) to prevent DoS
+const MAX_HEADER_COUNT: usize = 100;
+
 async fn read_lsp_message(
     reader: &mut BufReader<tokio::io::Stdin>,
     first_line: Option<String>,
@@ -71,6 +89,7 @@ async fn read_lsp_message(
     let mut content_length: Option<usize> = None;
     let mut pending = first_line;
     let mut seen_header = false;
+    let mut line_count = 0;
 
     loop {
         let line = if let Some(line) = pending.take() {
@@ -81,8 +100,25 @@ async fn read_lsp_message(
             if bytes == 0 {
                 return Ok(None);
             }
+            // Protect against DoS from extremely long header lines
+            if header.len() > MAX_HEADER_LENGTH {
+                return Err(anyhow!(
+                    "Header line length {} exceeds maximum allowed size of {} bytes",
+                    header.len(),
+                    MAX_HEADER_LENGTH
+                ));
+            }
             header.trim_end_matches(&['\r', '\n'][..]).to_string()
         };
+
+        // Protect against DoS from infinite headers or blank lines
+        line_count += 1;
+        if line_count > MAX_HEADER_COUNT {
+            return Err(anyhow!(
+                "Too many header lines or skipped blank lines (limit {})",
+                MAX_HEADER_COUNT
+            ));
+        }
 
         if line.is_empty() {
             // Skip leading blank lines; break only after seeing at least one header
@@ -129,6 +165,15 @@ async fn read_message(
             let bytes = reader.read_line(&mut line).await?;
             if bytes == 0 {
                 return Ok(None);
+            }
+
+            // Protect against DoS from extremely long lines during auto-detection
+            if line.len() > MAX_LINE_LENGTH {
+                return Err(anyhow!(
+                    "Line length {} exceeds maximum allowed size of {} bytes",
+                    line.len(),
+                    MAX_LINE_LENGTH
+                ));
             }
 
             let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
@@ -196,7 +241,16 @@ impl McpServer {
 
         info!("MCP server started, waiting for requests...");
 
-        while let Some(message) = read_message(&mut reader, &mut transport_mode).await? {
+        loop {
+            let message = match read_message(&mut reader, &mut transport_mode).await {
+                Ok(Some(message)) => message,
+                Ok(None) => break,
+                Err(e) => {
+                    error!("Failed to read message: {}", e);
+                    continue;
+                }
+            };
+
             if message.is_empty() {
                 continue;
             }
@@ -289,11 +343,18 @@ impl McpServer {
     /// Handle list tools request
     fn handle_list_tools(&self, id: Option<Value>) -> JsonRpcResponse {
         let result = ListToolsResult {
-            tools: vec![Tool {
-                name: SEARCH_CONTEXT_TOOL.name.to_string(),
-                description: SEARCH_CONTEXT_TOOL.description.to_string(),
-                input_schema: SearchContextToolDef::get_input_schema(),
-            }],
+            tools: vec![
+                Tool {
+                    name: SEARCH_CONTEXT_TOOL.name.to_string(),
+                    description: SEARCH_CONTEXT_TOOL.description.to_string(),
+                    input_schema: SearchContextToolDef::get_input_schema(),
+                },
+                Tool {
+                    name: ENHANCE_PROMPT_TOOL.name.to_string(),
+                    description: ENHANCE_PROMPT_TOOL.description.to_string(),
+                    input_schema: EnhancePromptToolDef::get_input_schema(),
+                },
+            ],
         };
 
         match serde_json::to_value(result) {
@@ -335,6 +396,33 @@ impl McpServer {
                 };
 
                 let tool = SearchContextTool::new(self.config.clone());
+                let result = tool.execute(args).await;
+
+                let call_result = CallToolResult {
+                    content: vec![TextContent::new(result.text)],
+                };
+
+                match serde_json::to_value(call_result) {
+                    Ok(value) => JsonRpcResponse::success(id, value),
+                    Err(e) => JsonRpcResponse::error(id, -32603, format!("Internal error: {}", e)),
+                }
+            }
+            "enhance_prompt" => {
+                let args: EnhancePromptArgs = match call_params.arguments {
+                    Some(args) => match serde_json::from_value(args) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            return JsonRpcResponse::error(
+                                id,
+                                -32602,
+                                format!("Invalid arguments: {}", e),
+                            );
+                        }
+                    },
+                    None => EnhancePromptArgs::default(),
+                };
+
+                let tool = EnhancePromptTool::new(self.config.clone());
                 let result = tool.execute(args).await;
 
                 let call_result = CallToolResult {
@@ -526,6 +614,14 @@ mod tests {
     fn test_content_length_exceeds_limit() {
         let length = MAX_MESSAGE_SIZE + 1;
         assert!(length > MAX_MESSAGE_SIZE);
+    }
+
+    #[test]
+    fn test_header_count_limit() {
+        // Just verify the constant is set reasonably
+        // Testing the actual async function logic would require mocking stdin which is complex
+        assert!(MAX_HEADER_COUNT >= 10);
+        assert!(MAX_HEADER_COUNT <= 1000);
     }
 
     // Tests for header line edge cases

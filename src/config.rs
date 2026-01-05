@@ -26,13 +26,13 @@ pub struct UploadStrategy {
 
 impl Config {
     pub fn new(base_url: String, token: String) -> Result<Arc<Self>> {
-        // Ensure base_url uses https://
-        let base_url = if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-            format!("https://{}", base_url)
-        } else if base_url.starts_with("http://") {
-            base_url.replace("http://", "https://")
-        } else {
+        // Ensure base_url uses https:// (using strip_prefix to avoid replacing http:// in path)
+        let base_url = if let Some(rest) = base_url.strip_prefix("http://") {
+            format!("https://{}", rest)
+        } else if base_url.starts_with("https://") {
             base_url
+        } else {
+            format!("https://{}", base_url)
         };
 
         // Remove trailing slash
