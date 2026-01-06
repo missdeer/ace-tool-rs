@@ -1,6 +1,6 @@
 [package]
 name = "ace-tool-rs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "MCP server for codebase indexing and semantic search"
 license = "MIT"

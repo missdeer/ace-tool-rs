@@ -29,7 +29,7 @@ const MAX_BLOB_SIZE: usize = 500 * 1024;
 const MAX_BATCH_SIZE: usize = 5 * 1024 * 1024;
 
 /// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
-const USER_AGENT: &str = "augment.cli/0.1.3/mcp";
+const USER_AGENT: &str = "augment.cli/0.12.0/mcp";
 
 /// Generate a unique request ID
 fn generate_request_id() -> String {
