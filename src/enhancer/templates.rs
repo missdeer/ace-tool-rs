@@ -1,6 +1,23 @@
 //! Web UI templates for the Prompt Enhancer
 //! Based on Augment VSCode plugin official templates
 
+/// Prompt enhancement template
+/// Copied from augment.mjs YDn function - must stay in sync
+/// Contains placeholder for original prompt only
+pub const ENHANCE_PROMPT_TEMPLATE: &str = r#"⚠️ NO TOOLS ALLOWED ⚠️
+
+Here is an instruction that I'd like to give you, but it needs to be improved. Rewrite and enhance this instruction to make it clearer, more specific, less ambiguous, and correct any mistakes. Do not use any tools: reply immediately with your answer, even if you're not sure. Consider the context of our conversation history when enhancing the prompt. If there is code in triple backticks (```) consider whether it is a code sample and should remain unchanged.Reply with the following format:
+
+### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<augment-enhanced-prompt>enhanced prompt goes here</augment-enhanced-prompt>
+
+### END RESPONSE ###
+
+Here is my original instruction:
+
+{original_prompt}"#;
+
 /// Web UI HTML template for the Prompt Enhancer
 pub const ENHANCER_UI_HTML: &str = r#"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -664,6 +681,66 @@ pub const ENHANCER_UI_HTML: &str = r#"<!DOCTYPE html>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // ENHANCE_PROMPT_TEMPLATE Tests
+    // ========================================================================
+
+    #[test]
+    fn test_enhance_prompt_template_not_empty() {
+        assert!(!ENHANCE_PROMPT_TEMPLATE.is_empty());
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_has_original_prompt_placeholder() {
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("{original_prompt}"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_has_no_tools_warning() {
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("NO TOOLS ALLOWED"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_has_response_format() {
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("### BEGIN RESPONSE ###"));
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("### END RESPONSE ###"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_has_augment_tag() {
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("<augment-enhanced-prompt>"));
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("</augment-enhanced-prompt>"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_has_code_block_instruction() {
+        // Must match augment.mjs: mentions triple backticks for code samples
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("triple backticks"));
+        assert!(ENHANCE_PROMPT_TEMPLATE.contains("code sample"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_replace_works() {
+        let result = ENHANCE_PROMPT_TEMPLATE.replace("{original_prompt}", "Add login feature");
+
+        assert!(result.contains("Add login feature"));
+        assert!(!result.contains("{original_prompt}"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_empty_value() {
+        let result = ENHANCE_PROMPT_TEMPLATE.replace("{original_prompt}", "");
+
+        assert!(!result.contains("{original_prompt}"));
+    }
+
+    #[test]
+    fn test_enhance_prompt_template_unicode_value() {
+        let result = ENHANCE_PROMPT_TEMPLATE.replace("{original_prompt}", "添加登录功能");
+
+        assert!(result.contains("添加登录功能"));
+    }
 
     // ========================================================================
     // HTML Template Content Tests

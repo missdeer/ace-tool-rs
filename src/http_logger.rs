@@ -233,15 +233,12 @@ fn truncate_utf8_safe(s: &str, max_len: usize) -> String {
         end -= 1;
     }
 
-    format!(
-        "{}...\n[truncated, total {} bytes]",
-        &s[..end],
-        s.len()
-    )
+    format!("{}...\n[truncated, total {} bytes]", &s[..end], s.len())
 }
 
 /// Helper to build request headers from reqwest RequestBuilder
 /// Returns None if logging is disabled (for lazy evaluation)
+#[allow(clippy::too_many_arguments)]
 pub fn build_request_log_if_enabled(
     method: &str,
     url: &str,

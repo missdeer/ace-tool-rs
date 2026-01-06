@@ -21,6 +21,7 @@ use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
 use crate::utils::project_detector::get_index_file_path;
 
 use super::server::EnhancerServer;
+use super::templates::ENHANCE_PROMPT_TEMPLATE;
 
 /// Default model for prompt enhancement API
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5";
@@ -36,7 +37,7 @@ const NODE_ID_NEW: i32 = 0;
 const NODE_ID_OLD: i32 = 1;
 
 /// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
-const USER_AGENT: &str = "augment.cli/0.1.3/mcp";
+const USER_AGENT: &str = "augment.cli/0.12.0/mcp";
 
 /// Generate a unique request ID
 fn generate_request_id() -> String {
@@ -428,7 +429,7 @@ async fn call_new_endpoint(
                 };
                 http_logger::log_request(None, req_log, Some(&response_log), duration_ms, None);
             }
-            handle_response_text(status.as_u16(), &body_text)
+            handle_response_text(status.as_u16(), &body_text, false)
         }
         Err(e) => {
             let error_msg = e.to_string();
@@ -440,6 +441,22 @@ async fn call_new_endpoint(
     }
 }
 
+/// Render the enhance prompt template safely without corrupting user input
+/// Uses split+concat instead of replace to avoid replacing placeholders
+/// that may appear in user content
+/// Note: Template only has {original_prompt} placeholder (matching augment.mjs)
+fn render_enhance_prompt(original_prompt: &str) -> Result<String> {
+    let (before, after) = ENHANCE_PROMPT_TEMPLATE
+        .split_once("{original_prompt}")
+        .ok_or_else(|| anyhow!("ENHANCE_PROMPT_TEMPLATE missing {{original_prompt}}"))?;
+
+    let mut rendered = String::with_capacity(before.len() + original_prompt.len() + after.len());
+    rendered.push_str(before);
+    rendered.push_str(original_prompt);
+    rendered.push_str(after);
+    Ok(rendered)
+}
+
 /// Call OLD /chat-stream endpoint (full request with blobs)
 async fn call_old_endpoint(
     client: &Client,
@@ -449,6 +466,9 @@ async fn call_old_endpoint(
     blob_names: &[String],
 ) -> Result<String> {
     let chat_history = parse_chat_history(conversation_history);
+
+    // Build final prompt using template (safe rendering to preserve user content)
+    let final_prompt = render_enhance_prompt(original_prompt)?;
 
     // Detect language for user guidelines
     let is_chinese = is_chinese_text(original_prompt);
@@ -469,7 +489,7 @@ async fn call_old_endpoint(
         prefix: None,
         selected_code: None,
         suffix: None,
-        message: Some(original_prompt.to_string()),
+        message: Some(final_prompt.clone()),
         chat_history,
         lang: None,
         blobs: BlobsPayload {
@@ -490,7 +510,7 @@ async fn call_old_endpoint(
             id: NODE_ID_OLD,
             node_type: 0,
             text_node: TextNode {
-                content: original_prompt.to_string(),
+                content: final_prompt,
             },
         }],
         mode: "CHAT".to_string(),
@@ -556,7 +576,7 @@ async fn call_old_endpoint(
                 };
                 http_logger::log_request(None, req_log, Some(&response_log), duration_ms, None);
             }
-            handle_response_text(status.as_u16(), &body_text)
+            handle_response_text(status.as_u16(), &body_text, true)
         }
         Err(e) => {
             let error_msg = e.to_string();
@@ -569,7 +589,9 @@ async fn call_old_endpoint(
 }
 
 /// Handle API response text (after body has been extracted)
-fn handle_response_text(status: u16, body_text: &str) -> Result<String> {
+/// For NEW endpoint: returns text directly
+/// For OLD endpoint: first tries streaming parse (line-by-line JSON), then extracts from XML tag
+fn handle_response_text(status: u16, body_text: &str, is_old_endpoint: bool) -> Result<String> {
     if status == 401 {
         return Err(anyhow!("Token invalid or expired"));
     }
@@ -584,17 +606,83 @@ fn handle_response_text(status: u16, body_text: &str) -> Result<String> {
         ));
     }
 
-    let resp: PromptEnhancerResponse =
-        serde_json::from_str(body_text).map_err(|e| anyhow!("Failed to parse response: {}", e))?;
+    let enhanced_text = if is_old_endpoint {
+        // OLD endpoint returns streaming response (line-by-line JSON)
+        // Try streaming parse first, then fall back to single JSON parse
+        parse_streaming_response(body_text)?
+    } else {
+        // NEW endpoint returns single JSON response
+        let resp: PromptEnhancerResponse = serde_json::from_str(body_text)
+            .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
+        resp.text
+            .ok_or_else(|| anyhow!("Prompt enhancer API returned empty result"))?
+    };
 
-    let enhanced_text = resp
-        .text
-        .ok_or_else(|| anyhow!("Prompt enhancer API returned empty result"))?;
+    // For OLD endpoint, parse XML tag to extract enhanced prompt
+    let enhanced_text = if is_old_endpoint {
+        extract_enhanced_prompt(&enhanced_text).unwrap_or_else(|| enhanced_text.clone())
+    } else {
+        enhanced_text
+    };
 
     // Replace Augment-specific tool names with ace-tool names
     let enhanced_text = replace_tool_names(&enhanced_text);
 
     Ok(enhanced_text)
+}
+
+/// Parse streaming response from /chat-stream endpoint
+/// Response format: each line is a JSON object with a "text" field
+/// Concatenates all text fields to build the complete response
+fn parse_streaming_response(body_text: &str) -> Result<String> {
+    let mut combined_text = String::new();
+    let mut parsed_any = false;
+
+    for line in body_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // Try to parse each line as JSON
+        if let Ok(resp) = serde_json::from_str::<PromptEnhancerResponse>(line) {
+            if let Some(text) = resp.text {
+                combined_text.push_str(&text);
+                parsed_any = true;
+            }
+        }
+    }
+
+    if parsed_any {
+        Ok(combined_text)
+    } else {
+        // Fall back to single JSON parse if streaming parse failed
+        let resp: PromptEnhancerResponse = serde_json::from_str(body_text)
+            .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
+        resp.text
+            .ok_or_else(|| anyhow!("Prompt enhancer API returned empty result"))
+    }
+}
+
+/// Extract enhanced prompt from XML-like response
+/// Looks for content between <augment-enhanced-prompt> and </augment-enhanced-prompt> tags
+/// Returns None if tag not found or content is empty/whitespace-only
+fn extract_enhanced_prompt(text: &str) -> Option<String> {
+    lazy_static::lazy_static! {
+        // More tolerant regex: allows optional whitespace/attributes in tags
+        static ref TAG_RE: Regex = Regex::new(
+            r"(?s)<augment-enhanced-prompt(?:\s+[^>]*)?>\s*(.*?)\s*</augment-enhanced-prompt\s*>"
+        ).unwrap();
+    }
+
+    TAG_RE.captures(text).and_then(|caps| {
+        let trimmed = caps.get(1)?.as_str().trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 /// Detect if text is primarily Chinese
@@ -781,6 +869,130 @@ mod tests {
         assert!(!is_chinese_text("。，！？"));
         // But with Chinese characters, it should
         assert!(is_chinese_text("你好！")); // 2 Chinese chars, 2/3 = 66%
+    }
+
+    // ========================================================================
+    // extract_enhanced_prompt Tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_enhanced_prompt_basic() {
+        let text = "<augment-enhanced-prompt>Enhanced content here</augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("Enhanced content here".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_with_surrounding_text() {
+        let text = r#"### BEGIN RESPONSE ###
+Here is an enhanced version:
+<augment-enhanced-prompt>The enhanced prompt</augment-enhanced-prompt>
+
+### END RESPONSE ###"#;
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("The enhanced prompt".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_multiline() {
+        let text = r#"<augment-enhanced-prompt>
+Line 1
+Line 2
+Line 3
+</augment-enhanced-prompt>"#;
+        let result = extract_enhanced_prompt(text);
+        assert!(result.is_some());
+        let content = result.unwrap();
+        assert!(content.contains("Line 1"));
+        assert!(content.contains("Line 2"));
+        assert!(content.contains("Line 3"));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_no_tag() {
+        let text = "Just some plain text without tags";
+        let result = extract_enhanced_prompt(text);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_empty_tag() {
+        let text = "<augment-enhanced-prompt></augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_whitespace_trimmed() {
+        let text = "<augment-enhanced-prompt>  \n  content  \n  </augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("content".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_chinese() {
+        let text = "<augment-enhanced-prompt>添加用户登录功能</augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("添加用户登录功能".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_special_chars() {
+        let text = "<augment-enhanced-prompt>Use `code` and \"quotes\"</augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("Use `code` and \"quotes\"".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_tag_with_whitespace() {
+        let text = "<augment-enhanced-prompt >  content </augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("content".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_tag_with_attributes() {
+        let text = "<augment-enhanced-prompt id=\"test\">content here</augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("content here".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_closing_tag_whitespace() {
+        let text = "<augment-enhanced-prompt>content</augment-enhanced-prompt >";
+        let result = extract_enhanced_prompt(text);
+        assert_eq!(result, Some("content".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_whitespace_only_content() {
+        let text = "<augment-enhanced-prompt>   \n\t  </augment-enhanced-prompt>";
+        let result = extract_enhanced_prompt(text);
+        assert!(result.is_none());
+    }
+
+    // ========================================================================
+    // render_enhance_prompt Tests
+    // ========================================================================
+
+    #[test]
+    fn test_render_enhance_prompt_preserves_placeholders_in_input() {
+        // User content containing placeholder-like text should remain intact
+        let prompt = "Use {conversation_history} and {original_prompt} literally";
+        let result = render_enhance_prompt(prompt).unwrap();
+
+        // The inserted content with placeholder-like text remains intact
+        assert!(result.contains(prompt));
+    }
+
+    #[test]
+    fn test_render_enhance_prompt_basic() {
+        let prompt = "Add feature";
+        let result = render_enhance_prompt(prompt).unwrap();
+
+        assert!(result.contains("Add feature"));
+        assert!(result.contains("NO TOOLS ALLOWED"));
+        assert!(result.contains("triple backticks"));
     }
 
     // ========================================================================
@@ -1880,5 +2092,95 @@ mod tests {
         };
 
         assert!(request.user_guidelines.is_empty());
+    }
+
+    // ========================================================================
+    // parse_streaming_response Tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_streaming_response_single_line() {
+        let body = r#"{"text":"Hello World"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_multiple_lines() {
+        let body = r#"{"text":"Hello "}
+{"text":"World"}
+{"text":"!"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Hello World!");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_with_empty_lines() {
+        let body = r#"{"text":"Hello "}
+
+{"text":"World"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_with_whitespace() {
+        let body = r#"  {"text":"Hello "}
+   {"text":"World"}   "#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_with_null_text() {
+        let body = r#"{"text":"Hello "}
+{"text":null}
+{"text":"World"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_fallback_to_single_json() {
+        // If no lines can be parsed as streaming, fall back to single JSON parse
+        let body = r#"{"text":"Single JSON response"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Single JSON response");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_with_xml_tag() {
+        let body = r#"{"text":"<augment-enhanced-prompt>"}
+{"text":"Enhanced prompt content"}
+{"text":"</augment-enhanced-prompt>"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert!(result.contains("<augment-enhanced-prompt>"));
+        assert!(result.contains("Enhanced prompt content"));
+        assert!(result.contains("</augment-enhanced-prompt>"));
+    }
+
+    #[test]
+    fn test_parse_streaming_response_chinese() {
+        let body = r#"{"text":"你好"}
+{"text":"世界"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "你好世界");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_mixed_valid_invalid() {
+        let body = r#"{"text":"Valid "}
+not a json line
+{"text":"content"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "Valid content");
+    }
+
+    #[test]
+    fn test_parse_streaming_response_empty_text() {
+        let body = r#"{"text":""}
+{"text":"content"}"#;
+        let result = parse_streaming_response(body).unwrap();
+        assert_eq!(result, "content");
     }
 }
