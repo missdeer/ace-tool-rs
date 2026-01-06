@@ -1,6 +1,6 @@
 # ace-tool-rs
 
-A high-performance MCP (Model Context Protocol) server for codebase indexing and semantic search, written in Rust.
+A high-performance MCP (Model Context Protocol) server for codebase indexing, semantic search, and prompt enhancement, written in Rust.
 
 ## Overview
 
@@ -8,6 +8,7 @@ ace-tool-rs is a Rust implementation of a codebase context engine that enables A
 
 - **Real-time codebase indexing** - Automatically indexes your project files and keeps the index up-to-date
 - **Semantic search** - Find relevant code using natural language descriptions
+- **Prompt enhancement** - Enhance user prompts with codebase context for clearer, more actionable requests
 - **Multi-language support** - Works with 50+ programming languages and file types
 - **Incremental updates** - Only uploads changed files to minimize network overhead
 - **Smart exclusions** - Respects `.gitignore` and common ignore patterns
