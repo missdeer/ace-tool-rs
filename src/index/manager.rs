@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use encoding_rs::{GB18030, GBK, UTF_8, WINDOWS_1252};
@@ -19,6 +19,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::config::{get_upload_strategy, Config};
+use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
 use crate::utils::project_detector::get_index_file_path;
 
 /// Maximum blob size in bytes (500KB)
@@ -155,6 +156,11 @@ impl IndexManager {
     /// Get the token
     pub fn token(&self) -> &str {
         &self.token
+    }
+
+    /// Get the project root
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
     }
 
     /// Load gitignore patterns
@@ -520,11 +526,38 @@ impl IndexManager {
             blobs: blobs.to_vec(),
         };
 
+        // Lazy serialization: only serialize body if logging is enabled
+        let request_body = if http_logger::is_enabled() {
+            serde_json::to_string(&request).ok()
+        } else {
+            None
+        };
+
         let mut last_error = None;
         let max_retries = 3;
 
         for attempt in 0..max_retries {
             let request_id = generate_request_id();
+            let start_time = Instant::now();
+
+            // Build request log only if logging is enabled
+            let http_request_log = if http_logger::is_enabled() {
+                Some(HttpRequestLog {
+                    method: "POST".to_string(),
+                    url: url.clone(),
+                    headers: http_logger::extract_headers_from_builder(
+                        "application/json",
+                        USER_AGENT,
+                        &request_id,
+                        get_session_id(),
+                        &self.token,
+                    ),
+                    body: request_body.clone(),
+                })
+            } else {
+                None
+            };
+
             let result = self
                 .client
                 .post(&url)
@@ -538,23 +571,87 @@ impl IndexManager {
                 .send()
                 .await;
 
+            let duration_ms = start_time.elapsed().as_millis() as u64;
+
             match result {
                 Ok(response) => {
                     let status = response.status();
+                    let response_headers = if http_logger::is_enabled() {
+                        http_logger::extract_response_headers(&response)
+                    } else {
+                        Vec::new()
+                    };
 
                     if status == 401 {
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: status.as_u16(),
+                                headers: response_headers,
+                                body: Some("Token invalid or expired".to_string()),
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                None,
+                            );
+                        }
                         return Err(anyhow!("Token invalid or expired"));
                     }
                     if status == 403 {
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: status.as_u16(),
+                                headers: response_headers,
+                                body: Some("Access denied".to_string()),
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                None,
+                            );
+                        }
                         return Err(anyhow!("Access denied, token may be disabled"));
                     }
                     if status == 400 {
                         let text = response.text().await.unwrap_or_default();
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: 400,
+                                headers: response_headers,
+                                body: Some(text.clone()),
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                None,
+                            );
+                        }
                         return Err(anyhow!("Bad request: {}", text));
                     }
 
                     if status.is_success() {
-                        let resp: BatchUploadResponse = response.json().await?;
+                        let body_text = response.text().await.unwrap_or_default();
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: status.as_u16(),
+                                headers: response_headers,
+                                body: Some(body_text.clone()),
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                None,
+                            );
+                        }
+                        let resp: BatchUploadResponse = serde_json::from_str(&body_text)?;
                         return Ok(resp.blob_names);
                     }
 
@@ -567,6 +664,20 @@ impl IndexManager {
                             .and_then(|v| v.parse::<u64>().ok())
                             .unwrap_or(1);
                         let wait_time = retry_after * 1000;
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: status.as_u16(),
+                                headers: response_headers,
+                                body: None,
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                Some(&format!("Rate limited, retrying in {}ms", wait_time)),
+                            );
+                        }
                         warn!(
                             "Rate limited (attempt {}/{}), retrying in {}ms...",
                             attempt + 1,
@@ -579,6 +690,20 @@ impl IndexManager {
 
                     if status.is_server_error() && attempt < max_retries - 1 {
                         let wait_time = 1000 * (1 << attempt);
+                        if let Some(ref req_log) = http_request_log {
+                            let response_log = HttpResponseLog {
+                                status: status.as_u16(),
+                                headers: response_headers,
+                                body: None,
+                            };
+                            http_logger::log_request(
+                                Some(&self.project_root),
+                                req_log,
+                                Some(&response_log),
+                                duration_ms,
+                                Some(&format!("Server error, retrying in {}ms", wait_time)),
+                            );
+                        }
                         warn!(
                             "Server error (attempt {}/{}), retrying in {}ms...",
                             attempt + 1,
@@ -589,10 +714,33 @@ impl IndexManager {
                         continue;
                     }
 
+                    if let Some(ref req_log) = http_request_log {
+                        let response_log = HttpResponseLog {
+                            status: status.as_u16(),
+                            headers: response_headers,
+                            body: None,
+                        };
+                        http_logger::log_request(
+                            Some(&self.project_root),
+                            req_log,
+                            Some(&response_log),
+                            duration_ms,
+                            Some(&format!("HTTP error: {}", status)),
+                        );
+                    }
                     return Err(anyhow!("HTTP error: {}", status));
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    if let Some(ref req_log) = http_request_log {
+                        http_logger::log_request(
+                            Some(&self.project_root),
+                            req_log,
+                            None,
+                            duration_ms,
+                            Some(&error_msg),
+                        );
+                    }
                     if attempt < max_retries - 1 {
                         let wait_time = 1000 * (1 << attempt);
                         warn!(
@@ -837,6 +985,27 @@ impl IndexManager {
         };
 
         let request_id = generate_request_id();
+        let start_time = Instant::now();
+
+        // Lazy serialization: only serialize body if logging is enabled
+        let http_request_log = if http_logger::is_enabled() {
+            let request_body = serde_json::to_string(&request).ok();
+            Some(HttpRequestLog {
+                method: "POST".to_string(),
+                url: url.clone(),
+                headers: http_logger::extract_headers_from_builder(
+                    "application/json",
+                    USER_AGENT,
+                    &request_id,
+                    get_session_id(),
+                    &self.token,
+                ),
+                body: request_body,
+            })
+        } else {
+            None
+        };
+
         let response = self
             .client
             .post(&url)
@@ -848,24 +1017,79 @@ impl IndexManager {
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&request)
             .send()
-            .await?;
+            .await;
 
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Search failed: {} - {}", status, text));
-        }
+        let duration_ms = start_time.elapsed().as_millis() as u64;
 
-        let search_response: SearchResponse = response.json().await?;
+        match response {
+            Ok(resp) => {
+                let status = resp.status();
+                let response_headers = if http_logger::is_enabled() {
+                    http_logger::extract_response_headers(&resp)
+                } else {
+                    Vec::new()
+                };
 
-        match search_response.formatted_retrieval {
-            Some(result) if !result.is_empty() => {
-                info!("Search complete");
-                Ok(result)
+                if !status.is_success() {
+                    let text = resp.text().await.unwrap_or_default();
+                    if let Some(ref req_log) = http_request_log {
+                        let response_log = HttpResponseLog {
+                            status: status.as_u16(),
+                            headers: response_headers,
+                            body: Some(text.clone()),
+                        };
+                        http_logger::log_request(
+                            Some(&self.project_root),
+                            req_log,
+                            Some(&response_log),
+                            duration_ms,
+                            Some(&format!("Search failed: {} - {}", status, text)),
+                        );
+                    }
+                    return Err(anyhow!("Search failed: {} - {}", status, text));
+                }
+
+                let body_text = resp.text().await.unwrap_or_default();
+                if let Some(ref req_log) = http_request_log {
+                    let response_log = HttpResponseLog {
+                        status: status.as_u16(),
+                        headers: response_headers,
+                        body: Some(body_text.clone()),
+                    };
+                    http_logger::log_request(
+                        Some(&self.project_root),
+                        req_log,
+                        Some(&response_log),
+                        duration_ms,
+                        None,
+                    );
+                }
+
+                let search_response: SearchResponse = serde_json::from_str(&body_text)?;
+
+                match search_response.formatted_retrieval {
+                    Some(result) if !result.is_empty() => {
+                        info!("Search complete");
+                        Ok(result)
+                    }
+                    _ => {
+                        info!("No relevant code found");
+                        Ok("No relevant code context found for your query.".to_string())
+                    }
+                }
             }
-            _ => {
-                info!("No relevant code found");
-                Ok("No relevant code context found for your query.".to_string())
+            Err(e) => {
+                let error_msg = e.to_string();
+                if let Some(ref req_log) = http_request_log {
+                    http_logger::log_request(
+                        Some(&self.project_root),
+                        req_log,
+                        None,
+                        duration_ms,
+                        Some(&error_msg),
+                    );
+                }
+                Err(anyhow!("Search request failed: {}", error_msg))
             }
         }
     }

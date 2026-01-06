@@ -7,7 +7,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use regex::Regex;
@@ -17,6 +17,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
 use crate::utils::project_detector::get_index_file_path;
 
 use super::server::EnhancerServer;
@@ -376,6 +377,26 @@ async fn call_new_endpoint(
 
     let url = format!("{}/prompt-enhancer", config.base_url);
     let request_id = generate_request_id();
+    let start_time = Instant::now();
+
+    // Lazy serialization: only build log if logging is enabled
+    let http_request_log = if http_logger::is_enabled() {
+        let request_body = serde_json::to_string(&payload).ok();
+        Some(HttpRequestLog {
+            method: "POST".to_string(),
+            url: url.clone(),
+            headers: http_logger::extract_headers_from_builder(
+                "application/json",
+                USER_AGENT,
+                &request_id,
+                get_session_id(),
+                &config.token,
+            ),
+            body: request_body,
+        })
+    } else {
+        None
+    };
 
     let response = client
         .post(&url)
@@ -386,9 +407,37 @@ async fn call_new_endpoint(
         .header("Authorization", format!("Bearer {}", config.token))
         .json(&payload)
         .send()
-        .await?;
+        .await;
 
-    handle_response(response).await
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let response_headers = if http_logger::is_enabled() {
+                http_logger::extract_response_headers(&resp)
+            } else {
+                Vec::new()
+            };
+            let body_text = resp.text().await.unwrap_or_default();
+            if let Some(ref req_log) = http_request_log {
+                let response_log = HttpResponseLog {
+                    status: status.as_u16(),
+                    headers: response_headers,
+                    body: Some(body_text.clone()),
+                };
+                http_logger::log_request(None, req_log, Some(&response_log), duration_ms, None);
+            }
+            handle_response_text(status.as_u16(), &body_text)
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            if let Some(ref req_log) = http_request_log {
+                http_logger::log_request(None, req_log, None, duration_ms, Some(&error_msg));
+            }
+            Err(anyhow!("Request failed: {}", error_msg))
+        }
+    }
 }
 
 /// Call OLD /chat-stream endpoint (full request with blobs)
@@ -456,6 +505,26 @@ async fn call_old_endpoint(
 
     let url = format!("{}/chat-stream", config.base_url);
     let request_id = generate_request_id();
+    let start_time = Instant::now();
+
+    // Lazy serialization: only build log if logging is enabled
+    let http_request_log = if http_logger::is_enabled() {
+        let request_body = serde_json::to_string(&payload).ok();
+        Some(HttpRequestLog {
+            method: "POST".to_string(),
+            url: url.clone(),
+            headers: http_logger::extract_headers_from_builder(
+                "application/json",
+                USER_AGENT,
+                &request_id,
+                get_session_id(),
+                &config.token,
+            ),
+            body: request_body,
+        })
+    } else {
+        None
+    };
 
     let response = client
         .post(&url)
@@ -466,27 +535,57 @@ async fn call_old_endpoint(
         .header("Authorization", format!("Bearer {}", config.token))
         .json(&payload)
         .send()
-        .await?;
+        .await;
 
-    handle_response(response).await
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+
+    match response {
+        Ok(resp) => {
+            let status = resp.status();
+            let response_headers = if http_logger::is_enabled() {
+                http_logger::extract_response_headers(&resp)
+            } else {
+                Vec::new()
+            };
+            let body_text = resp.text().await.unwrap_or_default();
+            if let Some(ref req_log) = http_request_log {
+                let response_log = HttpResponseLog {
+                    status: status.as_u16(),
+                    headers: response_headers,
+                    body: Some(body_text.clone()),
+                };
+                http_logger::log_request(None, req_log, Some(&response_log), duration_ms, None);
+            }
+            handle_response_text(status.as_u16(), &body_text)
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            if let Some(ref req_log) = http_request_log {
+                http_logger::log_request(None, req_log, None, duration_ms, Some(&error_msg));
+            }
+            Err(anyhow!("Request failed: {}", error_msg))
+        }
+    }
 }
 
-/// Handle API response
-async fn handle_response(response: reqwest::Response) -> Result<String> {
-    let status = response.status();
-
+/// Handle API response text (after body has been extracted)
+fn handle_response_text(status: u16, body_text: &str) -> Result<String> {
     if status == 401 {
         return Err(anyhow!("Token invalid or expired"));
     }
     if status == 403 {
         return Err(anyhow!("Access denied, token may be disabled"));
     }
-    if !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
-        return Err(anyhow!("Prompt enhancer API failed: {} - {}", status, text));
+    if !(200..300).contains(&status) {
+        return Err(anyhow!(
+            "Prompt enhancer API failed: {} - {}",
+            status,
+            body_text
+        ));
     }
 
-    let resp: PromptEnhancerResponse = response.json().await?;
+    let resp: PromptEnhancerResponse =
+        serde_json::from_str(body_text).map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
     let enhanced_text = resp
         .text

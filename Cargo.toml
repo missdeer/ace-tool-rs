@@ -70,6 +70,9 @@ http-body-util = "0.1"
 # Browser opening
 open = "5"
 
+# Date/time for logging
+chrono = "0.4"
+
 [dev-dependencies]
 # Temporary directories for tests
 tempfile = "3"
