@@ -62,6 +62,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Set log level (e.g., `info`, `debug`, `warn`) |
+| `ACE_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default, uses `/prompt-enhancer`) or `old` (uses `/chat-stream`) |
 
 ### Example
 
@@ -122,14 +123,15 @@ Run command like below:
 claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"/path/to/ace-tool-rs","args":["--base-url",  "https://api.example.com/",  "--token", "your-token-here"],"env":{}}'
 ```
 
-Modify `~/.claude/settings.json` to add permission for the tool:
+Modify `~/.claude/settings.json` to add permission for the tools:
 
 ```json
 $ cat settings.local.json
 {
   "permissions": {
     "allow": [
-      "mcp__ace-tool__search_context"
+      "mcp__ace-tool__search_context",
+      "mcp__ace-tool__enhance_prompt"
     ]
   }
 }
@@ -154,6 +156,33 @@ Search the codebase using natural language queries.
 - "What tests are there for the login functionality?"
 - "How is the database connected to the application?"
 - "Find the initialization flow of message queue consumers"
+
+#### `enhance_prompt`
+
+Enhance user prompts by combining codebase context and conversation history to generate clearer, more specific, and actionable prompts.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | Yes | The original prompt to enhance |
+| `conversation_history` | string | Yes | Recent conversation history (5-10 rounds) in format: `User: xxx\nAssistant: yyy` |
+| `project_root_path` | string | No | Absolute path to the project root directory (optional, defaults to current working directory) |
+
+**Features:**
+
+- Automatic language detection (Chinese input → Chinese output, English input → English output)
+- Uses codebase context from indexed files
+- Considers conversation history for better context understanding
+
+**API Endpoints:**
+
+The tool supports two backend endpoints, controlled by the `ACE_ENHANCER_ENDPOINT` environment variable:
+
+| Endpoint | Path | Description |
+|----------|------|-------------|
+| `new` (default) | `/prompt-enhancer` | Simplified request format, recommended |
+| `old` | `/chat-stream` | Full request with blobs, streaming response |
 
 ## Supported File Types
 
