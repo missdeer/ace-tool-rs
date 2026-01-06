@@ -15,6 +15,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::config::{get_upload_strategy, Config};
@@ -25,6 +26,21 @@ const MAX_BLOB_SIZE: usize = 500 * 1024;
 
 /// Maximum batch size in bytes (5MB)
 const MAX_BATCH_SIZE: usize = 5 * 1024 * 1024;
+
+/// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
+const USER_AGENT: &str = "augment.cli/0.1.2/mcp";
+
+/// Generate a unique request ID
+fn generate_request_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Generate a session ID (persistent for the lifetime of the process)
+fn get_session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static SESSION_ID: OnceLock<String> = OnceLock::new();
+    SESSION_ID.get_or_init(|| Uuid::new_v4().to_string())
+}
 
 /// Blob data structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -508,10 +524,15 @@ impl IndexManager {
         let max_retries = 3;
 
         for attempt in 0..max_retries {
+            let request_id = generate_request_id();
             let result = self
                 .client
                 .post(&url)
                 .timeout(Duration::from_millis(timeout_ms))
+                .header("Content-Type", "application/json")
+                .header("User-Agent", USER_AGENT)
+                .header("x-request-id", &request_id)
+                .header("x-request-session-id", get_session_id())
                 .header("Authorization", format!("Bearer {}", self.token))
                 .json(&request)
                 .send()
@@ -815,10 +836,15 @@ impl IndexManager {
             enable_commit_retrieval: false,
         };
 
+        let request_id = generate_request_id();
         let response = self
             .client
             .post(&url)
             .timeout(Duration::from_secs(60))
+            .header("Content-Type", "application/json")
+            .header("User-Agent", USER_AGENT)
+            .header("x-request-id", &request_id)
+            .header("x-request-session-id", get_session_id())
             .header("Authorization", format!("Bearer {}", self.token))
             .json(&request)
             .send()

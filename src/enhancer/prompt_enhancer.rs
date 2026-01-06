@@ -14,6 +14,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::config::Config;
 use crate::utils::project_detector::get_index_file_path;
@@ -24,7 +25,7 @@ use super::server::EnhancerServer;
 const DEFAULT_MODEL: &str = "claude-sonnet-4-5";
 
 /// Environment variable to control which endpoint to use
-/// Values: "new" (prompt-enhancer endpoint) or "old" (chat-stream endpoint, default)
+/// Values: "new" (prompt-enhancer endpoint, default) or "old" (chat-stream endpoint)
 const ENV_ENHANCER_ENDPOINT: &str = "ACE_ENHANCER_ENDPOINT";
 
 /// Node ID for NEW endpoint (matches augment.mjs promptEnhancer)
@@ -33,11 +34,26 @@ const NODE_ID_NEW: i32 = 0;
 /// Node ID for OLD endpoint
 const NODE_ID_OLD: i32 = 1;
 
-/// Check if we should use the new prompt-enhancer endpoint
+/// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
+const USER_AGENT: &str = "augment.cli/0.1.2/mcp";
+
+/// Generate a unique request ID
+fn generate_request_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Generate a session ID (persistent for the lifetime of the process)
+fn get_session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static SESSION_ID: OnceLock<String> = OnceLock::new();
+    SESSION_ID.get_or_init(|| Uuid::new_v4().to_string())
+}
+
+/// Check if we should use the new prompt-enhancer endpoint (default: true)
 fn use_new_endpoint() -> bool {
     std::env::var(ENV_ENHANCER_ENDPOINT)
-        .map(|v| v.trim().eq_ignore_ascii_case("new"))
-        .unwrap_or(false)
+        .map(|v| !v.trim().eq_ignore_ascii_case("old"))
+        .unwrap_or(true)
 }
 
 /// Request payload for NEW prompt-enhancer endpoint (simplified, matches augment.mjs)
@@ -52,19 +68,50 @@ struct PromptEnhancerRequestNew {
 }
 
 /// Request payload for OLD chat-stream endpoint (full request with blobs)
-#[derive(Debug, Serialize)]
+/// Matches augment.mjs chatStream request structure
+/// Note: All Option fields serialize as null (not skipped) to match augment.mjs behavior
+/// where undefined values are converted to null via dG() function
+#[derive(Debug, Serialize, Default)]
 struct PromptEnhancerRequestOld {
-    nodes: Vec<PromptNode>,
-    chat_history: Vec<ChatMessage>,
-    blobs: BlobsPayload,
-    conversation_id: Option<String>,
     model: String,
-    mode: String,
+    path: Option<String>,
+    prefix: Option<String>,
+    selected_code: Option<String>,
+    suffix: Option<String>,
+    message: Option<String>,
+    chat_history: Vec<ChatMessage>,
+    lang: Option<String>,
+    blobs: BlobsPayload,
     user_guided_blobs: Vec<String>,
+    context_code_exchange_request_id: Option<String>,
     external_source_ids: Vec<String>,
+    disable_auto_external_sources: Option<bool>,
     user_guidelines: String,
     workspace_guidelines: String,
+    feature_detection_flags: FeatureDetectionFlags,
+    third_party_override: Option<serde_json::Value>,
+    tool_definitions: Vec<serde_json::Value>,
+    nodes: Vec<PromptNode>,
+    mode: String,
+    agent_memories: Option<String>,
+    persona_type: Option<String>,
     rules: Vec<String>,
+    silent: Option<bool>,
+    enable_parallel_tool_use: Option<bool>,
+    conversation_id: Option<String>,
+    system_prompt: Option<String>,
+}
+
+#[derive(Debug, Serialize, Default)]
+struct FeatureDetectionFlags {
+    support_parallel_tool_use: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+struct BlobsPayload {
+    checkpoint_id: Option<String>,
+    added_blobs: Vec<String>,
+    deleted_blobs: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,13 +131,6 @@ struct TextNode {
 struct ChatMessage {
     role: String,
     content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct BlobsPayload {
-    checkpoint_id: Option<String>,
-    added_blobs: Vec<String>,
-    deleted_blobs: Vec<String>,
 }
 
 /// Response from prompt-enhancer API
@@ -335,11 +375,15 @@ async fn call_new_endpoint(
     };
 
     let url = format!("{}/prompt-enhancer", config.base_url);
+    let request_id = generate_request_id();
 
     let response = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", config.token))
         .header("Content-Type", "application/json")
+        .header("User-Agent", USER_AGENT)
+        .header("x-request-id", &request_id)
+        .header("x-request-session-id", get_session_id())
+        .header("Authorization", format!("Bearer {}", config.token))
         .json(&payload)
         .send()
         .await?;
@@ -365,8 +409,34 @@ async fn call_old_endpoint(
         String::new()
     };
 
-    // Build full request payload
+    // Sort blob names as augment.mjs does via gS() function
+    let mut sorted_blob_names = blob_names.to_vec();
+    sorted_blob_names.sort();
+
+    // Build full request payload (matches augment.mjs chatStream request structure)
     let payload = PromptEnhancerRequestOld {
+        model: DEFAULT_MODEL.to_string(),
+        path: None,
+        prefix: None,
+        selected_code: None,
+        suffix: None,
+        message: Some(original_prompt.to_string()),
+        chat_history,
+        lang: None,
+        blobs: BlobsPayload {
+            checkpoint_id: None,
+            added_blobs: sorted_blob_names,
+            deleted_blobs: Vec::new(),
+        },
+        user_guided_blobs: Vec::new(),
+        context_code_exchange_request_id: None,
+        external_source_ids: Vec::new(),
+        disable_auto_external_sources: None,
+        user_guidelines: language_guideline,
+        workspace_guidelines: String::new(),
+        feature_detection_flags: FeatureDetectionFlags::default(),
+        third_party_override: None,
+        tool_definitions: Vec::new(),
         nodes: vec![PromptNode {
             id: NODE_ID_OLD,
             node_type: 0,
@@ -374,28 +444,26 @@ async fn call_old_endpoint(
                 content: original_prompt.to_string(),
             },
         }],
-        chat_history,
-        blobs: BlobsPayload {
-            checkpoint_id: None,
-            added_blobs: blob_names.to_vec(),
-            deleted_blobs: Vec::new(),
-        },
-        conversation_id: None,
-        model: DEFAULT_MODEL.to_string(),
         mode: "CHAT".to_string(),
-        user_guided_blobs: Vec::new(),
-        external_source_ids: Vec::new(),
-        user_guidelines: language_guideline,
-        workspace_guidelines: String::new(),
+        agent_memories: None,
+        persona_type: None,
         rules: Vec::new(),
+        silent: None,
+        enable_parallel_tool_use: None,
+        conversation_id: None,
+        system_prompt: None,
     };
 
     let url = format!("{}/chat-stream", config.base_url);
+    let request_id = generate_request_id();
 
     let response = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", config.token))
         .header("Content-Type", "application/json")
+        .header("User-Agent", USER_AGENT)
+        .header("x-request-id", &request_id)
+        .header("x-request-session-id", get_session_id())
+        .header("Authorization", format!("Bearer {}", config.token))
         .json(&payload)
         .send()
         .await?;
@@ -889,9 +957,9 @@ mod tests {
         // Save original value to restore later
         let original_value = std::env::var(ENV_ENHANCER_ENDPOINT).ok();
 
-        // Test 1: Default should be old endpoint
+        // Test 1: Default should be new endpoint
         std::env::remove_var(ENV_ENHANCER_ENDPOINT);
-        assert!(!use_new_endpoint(), "Default should use old endpoint");
+        assert!(use_new_endpoint(), "Default should use new endpoint");
 
         // Test 2: Explicit "new" should use new endpoint
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "new");
@@ -909,53 +977,54 @@ mod tests {
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "old");
         assert!(!use_new_endpoint(), "\"old\" should use old endpoint");
 
-        // Test 6: Invalid value should default to old endpoint
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, "invalid");
-        assert!(!use_new_endpoint(), "Invalid value should use old endpoint");
+        // Test 6: Explicit "OLD" should use old endpoint (case insensitive)
+        std::env::set_var(ENV_ENHANCER_ENDPOINT, "OLD");
+        assert!(!use_new_endpoint(), "\"OLD\" should use old endpoint");
 
-        // Test 7: Whitespace should be trimmed
+        // Test 7: Invalid value should default to new endpoint
+        std::env::set_var(ENV_ENHANCER_ENDPOINT, "invalid");
+        assert!(use_new_endpoint(), "Invalid value should use new endpoint");
+
+        // Test 8: Whitespace should be trimmed
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "  new  ");
         assert!(use_new_endpoint(), "Whitespace should be trimmed");
 
-        // Test 8: Empty string should use old endpoint
+        // Test 9: Empty string should use new endpoint
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "");
-        assert!(!use_new_endpoint(), "Empty string should use old endpoint");
+        assert!(use_new_endpoint(), "Empty string should use new endpoint");
 
-        // Test 9: Whitespace only should use old endpoint
+        // Test 10: Whitespace only should use new endpoint
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "   ");
         assert!(
-            !use_new_endpoint(),
-            "Whitespace only should use old endpoint"
+            use_new_endpoint(),
+            "Whitespace only should use new endpoint"
         );
 
-        // Test 10: Newlines should be trimmed
+        // Test 11: Newlines should be trimmed
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "\nnew\n");
         assert!(use_new_endpoint(), "Newlines should be trimmed");
 
-        // Test 11: Mixed case variations
+        // Test 12: Mixed case variations
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "nEw");
         assert!(use_new_endpoint(), "Mixed case nEw should work");
 
         std::env::set_var(ENV_ENHANCER_ENDPOINT, "nEW");
         assert!(use_new_endpoint(), "Mixed case nEW should work");
 
-        // Test 12: Similar but different values
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, "newer");
-        assert!(!use_new_endpoint(), "\"newer\" is not \"new\"");
+        // Test 13: Explicit "old" with whitespace
+        std::env::set_var(ENV_ENHANCER_ENDPOINT, "  old  ");
+        assert!(!use_new_endpoint(), "\"  old  \" should use old endpoint");
 
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, "new1");
-        assert!(!use_new_endpoint(), "\"new1\" is not \"new\"");
+        // Test 14: Tabs in value
+        std::env::set_var(ENV_ENHANCER_ENDPOINT, "\told\t");
+        assert!(!use_new_endpoint(), "Tabs around old should be trimmed");
 
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, "anew");
-        assert!(!use_new_endpoint(), "\"anew\" is not \"new\"");
-
-        // Test 13: Tabs in value
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, "\tnew\t");
-        assert!(use_new_endpoint(), "Tabs should be trimmed");
-
-        // Test 14: Mixed whitespace
-        std::env::set_var(ENV_ENHANCER_ENDPOINT, " \t\nnew\n\t ");
-        assert!(use_new_endpoint(), "Mixed whitespace should be trimmed");
+        // Test 15: Mixed whitespace around old
+        std::env::set_var(ENV_ENHANCER_ENDPOINT, " \t\nold\n\t ");
+        assert!(
+            !use_new_endpoint(),
+            "Mixed whitespace around old should be trimmed"
+        );
 
         // Restore original value
         match original_value {
@@ -1003,20 +1072,15 @@ mod tests {
                     content: "test prompt".to_string(),
                 },
             }],
-            chat_history: vec![],
             blobs: BlobsPayload {
                 checkpoint_id: None,
                 added_blobs: vec!["blob1".to_string()],
                 deleted_blobs: vec![],
             },
-            conversation_id: None,
             model: "test-model".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
             user_guidelines: "test guideline".to_string(),
-            workspace_guidelines: String::new(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1259,20 +1323,14 @@ mod tests {
                     content: "test".to_string(),
                 },
             }],
-            chat_history: vec![],
             blobs: BlobsPayload {
                 checkpoint_id: Some("cp-123".to_string()),
                 added_blobs: vec!["blob1".to_string(), "blob2".to_string()],
                 deleted_blobs: vec!["blob3".to_string()],
             },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1287,21 +1345,9 @@ mod tests {
     #[test]
     fn test_old_request_empty_blobs() {
         let request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1312,21 +1358,11 @@ mod tests {
     #[test]
     fn test_old_request_with_guidelines() {
         let request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
             user_guidelines: "User guideline text".to_string(),
             workspace_guidelines: "Workspace guideline text".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1337,21 +1373,10 @@ mod tests {
     #[test]
     fn test_old_request_with_rules() {
         let request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
             rules: vec!["rule1".to_string(), "rule2".to_string()],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1361,21 +1386,11 @@ mod tests {
     #[test]
     fn test_old_request_with_external_sources() {
         let request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
             user_guided_blobs: vec!["guided1".to_string()],
             external_source_ids: vec!["ext1".to_string(), "ext2".to_string()],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1393,20 +1408,9 @@ mod tests {
                     content: "test".to_string(),
                 },
             }],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         assert_eq!(request.nodes[0].id, NODE_ID_OLD);
@@ -1416,22 +1420,11 @@ mod tests {
     #[test]
     fn test_old_request_chinese_guidelines() {
         let request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
             user_guidelines: "Please respond in Chinese (Simplified Chinese). 请用中文回复。"
                 .to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -1615,21 +1608,9 @@ mod tests {
         };
 
         let old_request = PromptEnhancerRequestOld {
-            nodes: vec![],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: "test".to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let new_json = serde_json::to_string(&new_request).unwrap();
@@ -1676,20 +1657,9 @@ mod tests {
                     content: "test".to_string(),
                 },
             }],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: DEFAULT_MODEL.to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
-            user_guidelines: "".to_string(),
-            workspace_guidelines: "".to_string(),
-            rules: vec![],
+            ..Default::default()
         };
 
         let new_json = serde_json::to_string(&new_request).unwrap();
@@ -1776,20 +1746,10 @@ mod tests {
                     content: chinese_prompt.to_string(),
                 },
             }],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: DEFAULT_MODEL.to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
             user_guidelines: language_guideline.clone(),
-            workspace_guidelines: String::new(),
-            rules: vec![],
+            ..Default::default()
         };
 
         assert!(request.user_guidelines.contains("请用中文回复"));
@@ -1814,20 +1774,10 @@ mod tests {
                     content: english_prompt.to_string(),
                 },
             }],
-            chat_history: vec![],
-            blobs: BlobsPayload {
-                checkpoint_id: None,
-                added_blobs: vec![],
-                deleted_blobs: vec![],
-            },
-            conversation_id: None,
             model: DEFAULT_MODEL.to_string(),
             mode: "CHAT".to_string(),
-            user_guided_blobs: vec![],
-            external_source_ids: vec![],
             user_guidelines: language_guideline.clone(),
-            workspace_guidelines: String::new(),
-            rules: vec![],
+            ..Default::default()
         };
 
         assert!(request.user_guidelines.is_empty());
