@@ -35,7 +35,7 @@ const NODE_ID_NEW: i32 = 0;
 const NODE_ID_OLD: i32 = 1;
 
 /// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
-const USER_AGENT: &str = "augment.cli/0.1.2/mcp";
+const USER_AGENT: &str = "augment.cli/0.1.3/mcp";
 
 /// Generate a unique request ID
 fn generate_request_id() -> String {
