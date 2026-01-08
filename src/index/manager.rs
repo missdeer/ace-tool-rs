@@ -20,6 +20,7 @@ use walkdir::WalkDir;
 
 use crate::config::{get_upload_strategy, Config};
 use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
+use crate::utils::path_normalizer::{normalize_path, normalize_relative_path, RuntimeEnv};
 use crate::utils::project_detector::get_index_file_path;
 
 /// Maximum blob size in bytes (500KB)
@@ -113,11 +114,19 @@ pub struct IndexManager {
     compiled_patterns: Vec<(String, Option<Regex>)>,
     index_file_path: PathBuf,
     client: Client,
+    runtime_env: RuntimeEnv,
 }
 
 impl IndexManager {
     pub fn new(config: Arc<Config>, project_root: PathBuf) -> Result<Self> {
         let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+
+        // Detect runtime environment for WSL support
+        let runtime_env = RuntimeEnv::detect();
+
+        // Normalize project root path
+        let normalized = normalize_path(&project_root, runtime_env);
+        let project_root = normalized.local;
 
         let index_file_path = get_index_file_path(&project_root);
 
@@ -145,6 +154,7 @@ impl IndexManager {
             compiled_patterns,
             index_file_path,
             client,
+            runtime_env,
         })
     }
 
@@ -161,6 +171,11 @@ impl IndexManager {
     /// Get the project root
     pub fn project_root(&self) -> &Path {
         &self.project_root
+    }
+
+    /// Get the runtime environment
+    pub fn runtime_env(&self) -> RuntimeEnv {
+        self.runtime_env
     }
 
     /// Load gitignore patterns
@@ -190,7 +205,7 @@ impl IndexManager {
             Err(_) => return false,
         };
 
-        let path_str = relative_path.to_string_lossy().replace('\\', "/");
+        let path_str = normalize_relative_path(&relative_path.to_string_lossy());
 
         // Check gitignore
         if let Some(gi) = gitignore {
@@ -472,11 +487,12 @@ impl IndexManager {
                 continue;
             }
 
-            let relative_path = path
-                .strip_prefix(&self.project_root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let relative_path = normalize_relative_path(
+                &path
+                    .strip_prefix(&self.project_root)
+                    .unwrap_or(path)
+                    .to_string_lossy(),
+            );
 
             let file_blobs = self.split_file_content(&relative_path, &clean_content);
             blobs.extend(file_blobs);
