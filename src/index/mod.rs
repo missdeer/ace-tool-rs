@@ -2,4 +2,4 @@
 
 mod manager;
 
-pub use manager::{Blob, IndexManager, IndexResult, IndexStats};
+pub use manager::{Blob, FileEntry, IndexData, IndexManager, IndexResult, IndexStats};

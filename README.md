@@ -10,7 +10,8 @@ ace-tool-rs is a Rust implementation of a codebase context engine that enables A
 - **Semantic search** - Find relevant code using natural language descriptions
 - **Prompt enhancement** - Enhance user prompts with codebase context for clearer, more actionable requests
 - **Multi-language support** - Works with 50+ programming languages and file types
-- **Incremental updates** - Only uploads changed files to minimize network overhead
+- **Incremental updates** - Uses mtime caching to skip unchanged files and only uploads new/modified content
+- **Parallel processing** - Multi-threaded file scanning and processing for faster indexing
 - **Smart exclusions** - Respects `.gitignore` and common ignore patterns
 
 ## Features
@@ -19,6 +20,7 @@ ace-tool-rs is a Rust implementation of a codebase context engine that enables A
 - **Adaptive Upload Strategy** - Automatically adjusts batch size and concurrency based on project size
 - **Multi-encoding Support** - Handles UTF-8, GBK, GB18030, and Windows-1252 encoded files
 - **Concurrent Uploads** - Parallel batch uploads for faster indexing of large projects
+- **Mtime Caching** - Tracks file modification times to avoid re-processing unchanged files
 - **Robust Error Handling** - Retry logic with exponential backoff and rate limiting support
 
 ## Installation
@@ -288,9 +290,10 @@ cargo clippy
 
 ### Code Structure
 
-- **69 unit tests** covering all major components
+- **360+ unit tests** covering all major components
 - Modular architecture with clear separation of concerns
 - Async/await throughout using Tokio runtime
+- Parallel file processing using Rayon
 - Comprehensive error handling with `anyhow`
 
 ## Limitations

@@ -1,15 +1,16 @@
 //! Index manager - Core indexing and search logic
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use encoding_rs::{GB18030, GBK, UTF_8, WINDOWS_1252};
 use futures::stream::{self, StreamExt};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use rayon::prelude::*;
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,9 @@ const MAX_BLOB_SIZE: usize = 500 * 1024;
 
 /// Maximum batch size in bytes (5MB)
 const MAX_BATCH_SIZE: usize = 5 * 1024 * 1024;
+
+/// Current index format version
+const CURRENT_INDEX_VERSION: u32 = 2;
 
 /// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
 const USER_AGENT: &str = "augment.cli/0.12.0/mcp";
@@ -49,6 +53,58 @@ fn get_session_id() -> &'static str {
 pub struct Blob {
     pub path: String,
     pub content: String,
+}
+
+/// Index data structure (v2 format with mtime support)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IndexData {
+    /// Index format version
+    pub version: u32,
+    /// Configuration fingerprint for detecting chunking config changes
+    pub config_hash: String,
+    /// File entries, key is normalized relative path (forward slashes)
+    pub entries: HashMap<String, FileEntry>,
+}
+
+impl IndexData {
+    /// Get all blob hashes from all entries
+    pub fn get_all_blob_hashes(&self) -> Vec<String> {
+        self.entries
+            .values()
+            .flat_map(|e| e.blob_hashes.iter().cloned())
+            .collect()
+    }
+}
+
+/// Single file index entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    /// Modification time (seconds since UNIX epoch)
+    pub mtime_secs: u64,
+    /// Modification time (nanoseconds part, 0-999_999_999)
+    pub mtime_nanos: u32,
+    /// File size in bytes
+    pub size: u64,
+    /// Blob hashes produced by this file (large files may have multiple chunks)
+    pub blob_hashes: Vec<String>,
+}
+
+/// Result of processing a single file
+#[derive(Debug)]
+struct ProcessedFile {
+    /// Normalized relative path
+    rel_path: String,
+    /// Processing result
+    result: ProcessedResult,
+}
+
+/// Processing result variants
+#[derive(Debug)]
+enum ProcessedResult {
+    /// Cache hit - reuse existing entry
+    Cached { entry: FileEntry },
+    /// New or modified file - contains blobs to upload
+    New { blobs: Vec<Blob>, entry: FileEntry },
 }
 
 /// Index result
@@ -103,6 +159,17 @@ struct SearchResponse {
     formatted_retrieval: Option<String>,
 }
 
+/// Calculate configuration fingerprint for detecting index-affecting config changes
+///
+/// Note: Currently only max_lines_per_blob affects blob splitting and hash calculation.
+/// If new config options affecting indexing are added, they must be included here.
+fn calculate_config_hash(max_lines_per_blob: usize) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"v1:");
+    hasher.update(max_lines_per_blob.to_le_bytes());
+    hex::encode(&hasher.finalize()[..8])
+}
+
 /// Index manager
 pub struct IndexManager {
     project_root: PathBuf,
@@ -115,6 +182,7 @@ pub struct IndexManager {
     index_file_path: PathBuf,
     client: Client,
     runtime_env: RuntimeEnv,
+    config_hash: String,
 }
 
 impl IndexManager {
@@ -144,6 +212,8 @@ impl IndexManager {
             })
             .collect();
 
+        let config_hash = calculate_config_hash(config.max_lines_per_blob);
+
         Ok(Self {
             project_root,
             base_url: config.base_url.clone(),
@@ -155,6 +225,7 @@ impl IndexManager {
             index_file_path,
             client,
             runtime_env,
+            config_hash,
         })
     }
 
@@ -176,6 +247,11 @@ impl IndexManager {
     /// Get the runtime environment
     pub fn runtime_env(&self) -> RuntimeEnv {
         self.runtime_env
+    }
+
+    /// Get the config hash
+    pub fn config_hash(&self) -> &str {
+        &self.config_hash
     }
 
     /// Load gitignore patterns
@@ -257,31 +333,59 @@ impl IndexManager {
         }
     }
 
-    /// Load index data from file
-    pub fn load_index(&self) -> Vec<String> {
+    /// Load index data from file (supports both v1 and v2 formats)
+    pub fn load_index(&self) -> IndexData {
         if !self.index_file_path.exists() {
-            return Vec::new();
+            return IndexData::default();
         }
 
-        match fs::read_to_string(&self.index_file_path) {
-            Ok(content) => match serde_json::from_str(&content) {
-                Ok(index) => index,
-                Err(e) => {
-                    warn!("Failed to parse index file, recreating: {}", e);
-                    Vec::new()
-                }
-            },
+        let content = match fs::read_to_string(&self.index_file_path) {
+            Ok(c) => c,
             Err(e) => {
                 error!("Failed to load index: {}", e);
-                Vec::new()
+                return IndexData::default();
             }
+        };
+
+        // Try to parse as new v2 format
+        if let Ok(data) = serde_json::from_str::<IndexData>(&content) {
+            // Check version and config hash
+            if data.version == CURRENT_INDEX_VERSION && data.config_hash == self.config_hash {
+                return data;
+            }
+            // Version or config mismatch, force rebuild
+            info!(
+                "Index version/config mismatch (v{} vs v{}, config {} vs {}), rebuilding",
+                data.version, CURRENT_INDEX_VERSION, data.config_hash, self.config_hash
+            );
+            return IndexData::default();
         }
+
+        // Try to parse as old v1 format (Vec<String>), trigger full rebuild
+        if serde_json::from_str::<Vec<String>>(&content).is_ok() {
+            info!("Detected old index format (v1), migrating to v2");
+            return IndexData::default();
+        }
+
+        warn!("Failed to parse index file, recreating");
+        IndexData::default()
     }
 
-    /// Save index data to file
-    pub fn save_index(&self, blob_names: &[String]) -> Result<()> {
-        let content = serde_json::to_string_pretty(blob_names)?;
-        fs::write(&self.index_file_path, content)?;
+    /// Save index data to file (atomic write)
+    pub fn save_index(&self, data: &IndexData) -> Result<()> {
+        let content = serde_json::to_string_pretty(data)?;
+        let tmp_path = self.index_file_path.with_extension("json.tmp");
+
+        // Write to temporary file
+        fs::write(&tmp_path, &content)?;
+
+        // Atomic rename (on Windows, need to remove target first)
+        #[cfg(windows)]
+        if self.index_file_path.exists() {
+            fs::remove_file(&self.index_file_path)?;
+        }
+
+        fs::rename(&tmp_path, &self.index_file_path)?;
         Ok(())
     }
 
@@ -312,6 +416,30 @@ impl IndexManager {
 
         // Fallback to UTF-8 with lossy conversion
         Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    /// Decode bytes with encoding detection (for use when bytes are already read)
+    fn decode_bytes_with_encoding(bytes: &[u8]) -> Result<String> {
+        let encodings = [UTF_8, GBK, GB18030, WINDOWS_1252];
+
+        for encoding in encodings {
+            let (content, _, had_errors) = encoding.decode(bytes);
+            if !had_errors {
+                let content_str = content.to_string();
+                let replacement_count = content_str.matches('\u{FFFD}').count();
+                let threshold = if content_str.len() < 100 {
+                    5
+                } else {
+                    (content_str.len() as f64 * 0.05) as usize
+                };
+
+                if replacement_count <= threshold {
+                    return Ok(content_str);
+                }
+            }
+        }
+
+        Ok(String::from_utf8_lossy(bytes).to_string())
     }
 
     /// Read file bytes
@@ -779,25 +907,32 @@ impl IndexManager {
         ))
     }
 
-    /// Index the project
+    /// Index the project with mtime caching and parallel processing
     pub async fn index_project(&self) -> IndexResult {
         info!("Starting project indexing: {:?}", self.project_root);
 
-        // Collect files
+        // Step 1: Collect file paths (via spawn_blocking to avoid blocking async runtime)
         info!("Scanning files...");
-        let blobs = match self.collect_files() {
-            Ok(b) => b,
-            Err(e) => {
-                error!("Failed to collect files: {}", e);
-                return IndexResult {
-                    status: "error".to_string(),
-                    message: format!("Failed to collect files: {}", e),
-                    stats: None,
-                };
-            }
-        };
+        let project_root_scan = self.project_root.clone();
+        let text_extensions_scan = self.text_extensions.clone();
+        let text_filenames_scan = self.text_filenames.clone();
+        let compiled_patterns_scan = self.compiled_patterns.clone();
 
-        if blobs.is_empty() {
+        let file_paths = tokio::task::spawn_blocking(move || {
+            collect_file_paths_standalone(
+                &project_root_scan,
+                &text_extensions_scan,
+                &text_filenames_scan,
+                &compiled_patterns_scan,
+            )
+        })
+        .await
+        .unwrap_or_else(|e| {
+            error!("File scanning failed: {}", e);
+            Vec::new()
+        });
+
+        if file_paths.is_empty() {
             warn!("No indexable text files found");
             return IndexResult {
                 status: "error".to_string(),
@@ -806,54 +941,93 @@ impl IndexManager {
             };
         }
 
-        info!("Found {} file chunks", blobs.len());
+        info!("Found {} files to process", file_paths.len());
 
-        // Load existing index
-        let existing_blob_names: HashSet<String> = self.load_index().into_iter().collect();
+        // Step 2: Load old index
+        let old_index = self.load_index();
 
-        // Calculate hashes for all blobs
-        let mut blob_hash_map: std::collections::HashMap<String, Blob> =
-            std::collections::HashMap::new();
-        for blob in blobs {
-            let hash = Self::calculate_blob_name(&blob.path, &blob.content);
-            blob_hash_map.insert(hash, blob);
+        // Step 3: Process files in parallel using rayon (via spawn_blocking)
+        let old_index_arc = Arc::new(old_index);
+        let project_root = self.project_root.clone();
+        let text_extensions = self.text_extensions.clone();
+        let text_filenames = self.text_filenames.clone();
+        let compiled_patterns = self.compiled_patterns.clone();
+        let max_lines_per_blob = self.max_lines_per_blob;
+
+        let results: Vec<ProcessedFile> = tokio::task::spawn_blocking(move || {
+            file_paths
+                .par_iter()
+                .filter_map(|path| {
+                    // We need to inline the processing logic here since we can't capture &self
+                    process_file_standalone(
+                        path,
+                        &old_index_arc,
+                        &project_root,
+                        &text_extensions,
+                        &text_filenames,
+                        &compiled_patterns,
+                        max_lines_per_blob,
+                    )
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_else(|e| {
+            error!("Parallel processing failed: {}", e);
+            Vec::new()
+        });
+
+        if results.is_empty() {
+            warn!("No files were successfully processed");
+            return IndexResult {
+                status: "error".to_string(),
+                message: "No files could be processed".to_string(),
+                stats: None,
+            };
         }
 
-        // Separate existing and new blobs
-        let all_hashes: HashSet<String> = blob_hash_map.keys().cloned().collect();
-        let existing_hashes: HashSet<String> = all_hashes
-            .intersection(&existing_blob_names)
-            .cloned()
-            .collect();
-        let new_hashes: Vec<String> = all_hashes
-            .difference(&existing_blob_names)
-            .cloned()
-            .collect();
+        // Step 4: Build new index from results (not extend - ensures deleted files are removed)
+        let mut new_index = IndexData {
+            version: CURRENT_INDEX_VERSION,
+            config_hash: self.config_hash.clone(),
+            entries: HashMap::with_capacity(results.len()),
+        };
+
+        let mut cached_count = 0usize;
+        let mut new_blobs: Vec<Blob> = Vec::new();
+
+        for pf in results {
+            match pf.result {
+                ProcessedResult::Cached { entry } => {
+                    cached_count += entry.blob_hashes.len();
+                    new_index.entries.insert(pf.rel_path, entry);
+                }
+                ProcessedResult::New { blobs, entry } => {
+                    new_index.entries.insert(pf.rel_path, entry);
+                    new_blobs.extend(blobs);
+                }
+            }
+        }
 
         info!(
-            "Incremental indexing: {} existing, {} new",
-            existing_hashes.len(),
-            new_hashes.len()
+            "Incremental indexing: {} cached blobs, {} new blobs",
+            cached_count,
+            new_blobs.len()
         );
 
+        // Step 5: Upload new blobs
         let mut uploaded_blob_names: Vec<String> = Vec::new();
         let mut failed_batch_count: usize = 0;
 
-        if !new_hashes.is_empty() {
-            let blobs_to_upload: Vec<Blob> = new_hashes
-                .iter()
-                .filter_map(|h| blob_hash_map.get(h).cloned())
-                .collect();
-
-            let strategy = get_upload_strategy(blobs_to_upload.len());
+        if !new_blobs.is_empty() {
+            let strategy = get_upload_strategy(new_blobs.len());
             info!(
                 "Project scale: {} (batch: {}, concurrency: {})",
                 strategy.scale_name, strategy.batch_size, strategy.concurrency
             );
 
-            // Upload in batches
-            let blobs_count = blobs_to_upload.len();
-            let batches = self.build_batches(blobs_to_upload, strategy.batch_size);
+            let blobs_count = new_blobs.len();
+            let batches = self.build_batches(new_blobs, strategy.batch_size);
 
             info!(
                 "Uploading {} new chunks in {} batches (concurrency: {})",
@@ -862,12 +1036,11 @@ impl IndexManager {
                 strategy.concurrency
             );
 
-            // Upload batches concurrently with controlled concurrency
             let total_batches = batches.len();
             let timeout_ms = strategy.timeout_ms;
             let concurrency = strategy.concurrency;
 
-            let results: Vec<(usize, Result<Vec<String>>)> = stream::iter(
+            let upload_results: Vec<(usize, Result<Vec<String>>)> = stream::iter(
                 batches
                     .into_iter()
                     .enumerate()
@@ -881,8 +1054,7 @@ impl IndexManager {
             .collect()
             .await;
 
-            // Process results
-            for (i, result) in results {
+            for (i, result) in upload_results {
                 match result {
                     Ok(names) => {
                         uploaded_blob_names.extend(names);
@@ -897,39 +1069,38 @@ impl IndexManager {
             info!("No new files to upload, using cached index");
         }
 
-        // Save index
-        let all_blob_names: Vec<String> = existing_hashes
-            .into_iter()
-            .chain(uploaded_blob_names.iter().cloned())
-            .collect();
-
-        let save_failed = if let Err(e) = self.save_index(&all_blob_names) {
+        // Step 6: Save new index (atomic write)
+        let total_blobs = cached_count + uploaded_blob_names.len();
+        let save_failed = if let Err(e) = self.save_index(&new_index) {
             error!("Failed to save index: {}", e);
             true
         } else {
             false
         };
 
-        info!("Indexing complete: {} total chunks", all_blob_names.len());
+        info!(
+            "Indexing complete: {} files, {} total blobs",
+            new_index.entries.len(),
+            total_blobs
+        );
 
-        // Determine status based on failed batches and save result
+        // Step 7: Determine result status
         let (status, message) = if save_failed {
             (
                 "error".to_string(),
                 format!(
                     "Failed to save index (indexed {} blobs, {} failed batches)",
-                    all_blob_names.len(),
-                    failed_batch_count
+                    total_blobs, failed_batch_count
                 ),
             )
         } else if failed_batch_count > 0 {
             (
                 "partial".to_string(),
                 format!(
-                    "Indexed {} blobs with {} failed batches (existing: {}, new: {})",
-                    all_blob_names.len(),
+                    "Indexed {} blobs with {} failed batches (cached: {}, new: {})",
+                    total_blobs,
                     failed_batch_count,
-                    all_blob_names.len() - uploaded_blob_names.len(),
+                    cached_count,
                     uploaded_blob_names.len()
                 ),
             )
@@ -937,9 +1108,9 @@ impl IndexManager {
             (
                 "success".to_string(),
                 format!(
-                    "Indexed {} blobs (existing: {}, new: {})",
-                    all_blob_names.len(),
-                    all_blob_names.len() - uploaded_blob_names.len(),
+                    "Indexed {} blobs (cached: {}, new: {})",
+                    total_blobs,
+                    cached_count,
                     uploaded_blob_names.len()
                 ),
             )
@@ -949,8 +1120,8 @@ impl IndexManager {
             status,
             message,
             stats: Some(IndexStats {
-                total_blobs: all_blob_names.len(),
-                existing_blobs: all_blob_names.len() - uploaded_blob_names.len(),
+                total_blobs,
+                existing_blobs: cached_count,
                 new_blobs: uploaded_blob_names.len(),
                 failed_batches: if failed_batch_count > 0 {
                     Some(failed_batch_count)
@@ -978,7 +1149,8 @@ impl IndexManager {
         }
 
         // Load index
-        let blob_names = self.load_index();
+        let index_data = self.load_index();
+        let blob_names = index_data.get_all_blob_hashes();
         if blob_names.is_empty() {
             return Err(anyhow!("No blobs found after indexing"));
         }
@@ -1109,4 +1281,318 @@ impl IndexManager {
             }
         }
     }
+}
+
+/// Standalone file processing function for use in parallel context
+/// (cannot capture &self in spawn_blocking closure)
+fn process_file_standalone(
+    path: &Path,
+    old_index: &IndexData,
+    project_root: &Path,
+    _text_extensions: &HashSet<String>,
+    _text_filenames: &HashSet<String>,
+    _compiled_patterns: &[(String, Option<Regex>)],
+    max_lines_per_blob: usize,
+) -> Option<ProcessedFile> {
+    // Calculate relative path
+    let rel_path = match path.strip_prefix(project_root) {
+        Ok(p) => normalize_relative_path(&p.to_string_lossy()),
+        Err(_) => return None,
+    };
+
+    // Helper to preserve old entry on transient errors
+    let preserve_old = || -> Option<ProcessedFile> {
+        old_index
+            .entries
+            .get(&rel_path)
+            .map(|cached| ProcessedFile {
+                rel_path: rel_path.clone(),
+                result: ProcessedResult::Cached {
+                    entry: cached.clone(),
+                },
+            })
+    };
+
+    // Get metadata
+    // NotFound = file deleted, don't preserve; other errors = transient, preserve old entry
+    let metadata = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return preserve_old(),
+    };
+
+    // Check file size before reading
+    if metadata.len() > MAX_BLOB_SIZE as u64 {
+        return None;
+    }
+
+    let mtime = match metadata.modified() {
+        Ok(t) => t,
+        Err(_) => return preserve_old(),
+    };
+
+    let duration = mtime.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let mtime_secs = duration.as_secs();
+    let mtime_nanos = duration.subsec_nanos();
+    let size = metadata.len();
+
+    // Check cache
+    // For high-precision filesystems (mtime_nanos != 0): use mtime+size for cache hit
+    // For low-precision filesystems (mtime_nanos == 0): use mtime_secs+size, then verify by hash
+    if let Some(cached) = old_index.entries.get(&rel_path) {
+        if cached.mtime_secs == mtime_secs && cached.size == size && !cached.blob_hashes.is_empty()
+        {
+            // High precision: mtime_nanos match confirms cache hit
+            if mtime_nanos != 0 && cached.mtime_nanos == mtime_nanos {
+                return Some(ProcessedFile {
+                    rel_path,
+                    result: ProcessedResult::Cached {
+                        entry: cached.clone(),
+                    },
+                });
+            }
+            // Low precision (mtime_nanos=0): read file, compute hash, compare with cached
+            // If hash matches, it's a cache hit (avoid re-upload)
+            if mtime_nanos == 0 {
+                if let Ok(content) = IndexManager::read_file_with_encoding(path) {
+                    if !IndexManager::is_binary_content(&content) {
+                        let clean_content = IndexManager::sanitize_content(&content);
+                        if clean_content.len() <= MAX_BLOB_SIZE {
+                            let blobs = split_file_content_standalone(
+                                &rel_path,
+                                &clean_content,
+                                max_lines_per_blob,
+                            );
+                            let new_hashes: Vec<String> = blobs
+                                .iter()
+                                .map(|b| IndexManager::calculate_blob_name(&b.path, &b.content))
+                                .collect();
+                            // Hash match = content unchanged, use cached entry with updated mtime
+                            if new_hashes == cached.blob_hashes {
+                                let updated_entry = FileEntry {
+                                    mtime_secs,
+                                    mtime_nanos: 0,
+                                    size,
+                                    blob_hashes: cached.blob_hashes.clone(),
+                                };
+                                return Some(ProcessedFile {
+                                    rel_path,
+                                    result: ProcessedResult::Cached {
+                                        entry: updated_entry,
+                                    },
+                                });
+                            }
+                            // Hash mismatch = content changed, return as new
+                            return Some(ProcessedFile {
+                                rel_path,
+                                result: ProcessedResult::New {
+                                    blobs,
+                                    entry: FileEntry {
+                                        mtime_secs,
+                                        mtime_nanos: 0,
+                                        size,
+                                        blob_hashes: new_hashes,
+                                    },
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Cache miss - read and process file
+    // Try to read file; handle deletion that may occur between metadata check and read
+    let content = match fs::read(path) {
+        Ok(bytes) => {
+            // Decode with encoding detection
+            match IndexManager::decode_bytes_with_encoding(&bytes) {
+                Ok(c) => c,
+                Err(_) => return preserve_old(),
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return preserve_old(), // Other read errors: preserve old entry
+    };
+
+    // Skip binary files
+    if IndexManager::is_binary_content(&content) {
+        return None;
+    }
+
+    let clean_content = IndexManager::sanitize_content(&content);
+
+    if clean_content.len() > MAX_BLOB_SIZE {
+        return None;
+    }
+
+    let blobs = split_file_content_standalone(&rel_path, &clean_content, max_lines_per_blob);
+    let blob_hashes: Vec<String> = blobs
+        .iter()
+        .map(|b| IndexManager::calculate_blob_name(&b.path, &b.content))
+        .collect();
+
+    let entry = FileEntry {
+        mtime_secs,
+        mtime_nanos,
+        size,
+        blob_hashes,
+    };
+
+    Some(ProcessedFile {
+        rel_path,
+        result: ProcessedResult::New { blobs, entry },
+    })
+}
+
+/// Standalone file content splitting for use in parallel context
+fn split_file_content_standalone(
+    file_path: &str,
+    content: &str,
+    max_lines_per_blob: usize,
+) -> Vec<Blob> {
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    let max_lines = if max_lines_per_blob == 0 {
+        800
+    } else {
+        max_lines_per_blob
+    };
+
+    if total_lines <= max_lines {
+        return vec![Blob {
+            path: file_path.to_string(),
+            content: content.to_string(),
+        }];
+    }
+
+    let num_chunks = total_lines.div_ceil(max_lines);
+    let mut blobs = Vec::new();
+
+    for chunk_idx in 0..num_chunks {
+        let start_line = chunk_idx * max_lines;
+        let end_line = (start_line + max_lines).min(total_lines);
+        let chunk_lines: Vec<&str> = lines[start_line..end_line].to_vec();
+        let chunk_content = chunk_lines.join("\n");
+        let chunk_path = format!("{}#chunk{}of{}", file_path, chunk_idx + 1, num_chunks);
+
+        blobs.push(Blob {
+            path: chunk_path,
+            content: chunk_content,
+        });
+    }
+
+    blobs
+}
+
+/// Standalone file path collection for use in spawn_blocking
+fn collect_file_paths_standalone(
+    project_root: &Path,
+    text_extensions: &HashSet<String>,
+    text_filenames: &HashSet<String>,
+    compiled_patterns: &[(String, Option<Regex>)],
+) -> Vec<PathBuf> {
+    // Load gitignore
+    let gitignore = {
+        let gitignore_path = project_root.join(".gitignore");
+        if gitignore_path.exists() {
+            let mut builder = GitignoreBuilder::new(project_root);
+            let _ = builder.add(&gitignore_path);
+            builder.build().ok()
+        } else {
+            None
+        }
+    };
+
+    WalkDir::new(project_root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            !should_exclude_standalone(
+                e.path(),
+                e.file_type().is_dir(),
+                project_root,
+                gitignore.as_ref(),
+                compiled_patterns,
+            )
+        })
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| is_indexable_file_standalone(e.path(), text_extensions, text_filenames))
+        .map(|e| e.into_path())
+        .collect()
+}
+
+/// Standalone exclude check for use in spawn_blocking
+fn should_exclude_standalone(
+    path: &Path,
+    is_dir: bool,
+    project_root: &Path,
+    gitignore: Option<&Gitignore>,
+    compiled_patterns: &[(String, Option<Regex>)],
+) -> bool {
+    let relative_path = match path.strip_prefix(project_root) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let path_str = normalize_relative_path(&relative_path.to_string_lossy());
+
+    // Check gitignore
+    if let Some(gi) = gitignore {
+        if gi.matched(&path_str, is_dir).is_ignore() {
+            return true;
+        }
+    }
+
+    // Check exclude patterns using precompiled regexes
+    let path_parts: Vec<&str> = path_str.split('/').collect();
+    for (pattern, compiled_regex) in compiled_patterns {
+        if let Some(regex) = compiled_regex {
+            // Check each path component
+            for part in &path_parts {
+                if regex.is_match(part) {
+                    return true;
+                }
+            }
+            // Check full path
+            if regex.is_match(&path_str) {
+                return true;
+            }
+        } else {
+            // Fallback to string matching if regex failed to compile
+            for part in &path_parts {
+                if *part == pattern {
+                    return true;
+                }
+            }
+            if path_str == *pattern {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Standalone indexable file check for use in spawn_blocking
+fn is_indexable_file_standalone(
+    path: &Path,
+    text_extensions: &HashSet<String>,
+    text_filenames: &HashSet<String>,
+) -> bool {
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e.to_lowercase()))
+        .unwrap_or_default();
+
+    text_filenames.contains(filename) || (!ext.is_empty() && text_extensions.contains(&ext))
 }

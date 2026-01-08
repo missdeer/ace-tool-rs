@@ -56,6 +56,9 @@ walkdir = "2"
 # Regex for pattern matching
 regex = "1"
 
+# Parallel processing
+rayon = "1.10"
+
 # Hex encoding
 hex = "0.4"
 
