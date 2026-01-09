@@ -12,6 +12,11 @@ fn create_test_config() -> Arc<Config> {
     Config::new(
         "https://api.example.com".to_string(),
         "test-token".to_string(),
+        None,
+        None,
+        None,
+        None,
+        false,
     )
     .unwrap()
 }

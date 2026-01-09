@@ -29,6 +29,26 @@ struct Args {
     /// Transport framing: auto, lsp, line
     #[arg(long, value_enum, default_value = "auto")]
     transport: TransportArg,
+
+    /// Maximum lines per blob (default: 800)
+    #[arg(long)]
+    max_lines_per_blob: Option<usize>,
+
+    /// Upload timeout in seconds (default: adaptive)
+    #[arg(long)]
+    upload_timeout: Option<u64>,
+
+    /// Upload concurrency (default: adaptive)
+    #[arg(long)]
+    upload_concurrency: Option<usize>,
+
+    /// Retrieval timeout in seconds (default: 60)
+    #[arg(long)]
+    retrieval_timeout: Option<u64>,
+
+    /// Disable adaptive strategy
+    #[arg(long, default_value = "false")]
+    no_adaptive: bool,
 }
 
 #[tokio::main]
@@ -42,7 +62,15 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize configuration
-    let config = Config::new(args.base_url, args.token)?;
+    let config = Config::new(
+        args.base_url,
+        args.token,
+        args.max_lines_per_blob,
+        args.upload_timeout,
+        args.upload_concurrency,
+        args.retrieval_timeout,
+        args.no_adaptive,
+    )?;
 
     info!("Starting ace-tool MCP server");
 

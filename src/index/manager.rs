@@ -1,6 +1,6 @@
 //! Index manager - Core indexing and search logic
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use encoding_rs::{GB18030, GBK, UTF_8, WINDOWS_1252};
-use futures::stream::{self, StreamExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use rayon::prelude::*;
 use regex::Regex;
@@ -19,8 +19,9 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::config::{get_upload_strategy, Config};
+use crate::config::Config;
 use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
+use crate::strategy::{AdaptiveStrategy, ErrorType};
 use crate::utils::path_normalizer::{normalize_path, normalize_relative_path, RuntimeEnv};
 use crate::utils::project_detector::get_index_file_path;
 
@@ -135,6 +136,15 @@ struct BatchUploadResponse {
     blob_names: Vec<String>,
 }
 
+/// Result of a single batch upload attempt
+#[derive(Debug)]
+struct BatchUploadResult {
+    blob_names: Vec<String>,
+    latency_ms: u64,
+    error_type: Option<ErrorType>,
+    success: bool,
+}
+
 /// Search request payload
 #[derive(Debug, Serialize)]
 struct SearchRequest {
@@ -183,6 +193,9 @@ pub struct IndexManager {
     client: Client,
     runtime_env: RuntimeEnv,
     config_hash: String,
+    retrieval_timeout_secs: u64,
+    no_adaptive: bool,
+    cli_overrides: crate::config::CliOverrides,
 }
 
 impl IndexManager {
@@ -226,6 +239,9 @@ impl IndexManager {
             client,
             runtime_env,
             config_hash,
+            retrieval_timeout_secs: config.retrieval_timeout_secs,
+            no_adaptive: config.no_adaptive,
+            cli_overrides: config.cli_overrides.clone(),
         })
     }
 
@@ -658,33 +674,125 @@ impl IndexManager {
         batches
     }
 
-    /// Upload a batch of blobs with retry
-    async fn upload_batch(&self, blobs: &[Blob], timeout_ms: u64) -> Result<Vec<String>> {
-        let batch_size: usize = blobs.iter().map(|b| b.content.len() + b.path.len()).sum();
-        if batch_size > MAX_BATCH_SIZE {
-            return Err(anyhow!("Batch too large: {}MB", batch_size / 1024 / 1024));
+    /// Upload blobs with adaptive strategy
+    async fn upload_blobs_adaptive(
+        &self,
+        blobs: Vec<Blob>,
+        strategy: &mut AdaptiveStrategy,
+    ) -> (Vec<String>, usize) {
+        let batches = self.build_batches(blobs, strategy.batch_size());
+        let total_batches = batches.len();
+        let mut uploaded_blob_names: Vec<String> = Vec::new();
+        let mut failed_batch_count: usize = 0;
+
+        info!(
+            "Uploading {} batches (adaptive: concurrency={}, timeout={}s)",
+            total_batches,
+            strategy.concurrency(),
+            strategy.timeout_ms() / 1000
+        );
+
+        // Use a queue for pending batches and FuturesUnordered for active tasks
+        let mut batch_queue: VecDeque<(usize, Vec<Blob>)> =
+            batches.into_iter().enumerate().collect();
+        let mut active_tasks = FuturesUnordered::new();
+
+        // Helper to spawn a task
+        let spawn_task = |index: usize,
+                          batch: Vec<Blob>,
+                          timeout_ms: u64,
+                          client: Client,
+                          base_url: String,
+                          token: String,
+                          project_root: PathBuf| {
+            async move {
+                let result = Self::upload_batch_internal(
+                    &client,
+                    &base_url,
+                    &token,
+                    &project_root,
+                    &batch,
+                    timeout_ms,
+                )
+                .await;
+                (index, result)
+            }
+        };
+
+        // Loop until all batches are processed
+        while !batch_queue.is_empty() || !active_tasks.is_empty() {
+            // 1. Fill active tasks up to current concurrency limit
+            let current_concurrency = strategy.concurrency();
+            while active_tasks.len() < current_concurrency && !batch_queue.is_empty() {
+                if let Some((i, batch)) = batch_queue.pop_front() {
+                    info!("Starting batch {}/{}...", i + 1, total_batches);
+                    active_tasks.push(spawn_task(
+                        i,
+                        batch,
+                        strategy.timeout_ms(),
+                        self.client.clone(),
+                        self.base_url.clone(),
+                        self.token.clone(),
+                        self.project_root.clone(),
+                    ));
+                }
+            }
+
+            // 2. Wait for the next task to complete
+            if let Some((i, result)) = active_tasks.next().await {
+                // 3. Record outcome and adjust strategy
+                strategy.record_outcome(result.success, result.latency_ms, result.error_type);
+
+                if result.success {
+                    uploaded_blob_names.extend(result.blob_names);
+                } else {
+                    error!("Batch {} upload failed", i + 1);
+                    failed_batch_count += 1;
+                }
+            }
         }
 
-        let url = format!("{}/batch-upload", self.base_url);
+        (uploaded_blob_names, failed_batch_count)
+    }
+
+    /// Internal batch upload with metrics (static method)
+    async fn upload_batch_internal(
+        client: &Client,
+        base_url: &str,
+        token: &str,
+        project_root: &Path,
+        blobs: &[Blob],
+        timeout_ms: u64,
+    ) -> BatchUploadResult {
+        let batch_size: usize = blobs.iter().map(|b| b.content.len() + b.path.len()).sum();
+        if batch_size > MAX_BATCH_SIZE {
+            return BatchUploadResult {
+                blob_names: Vec::new(),
+                latency_ms: 0,
+                error_type: Some(ErrorType::ClientError),
+                success: false,
+            };
+        }
+
+        let url = format!("{}/batch-upload", base_url);
         let request = BatchUploadRequest {
             blobs: blobs.to_vec(),
         };
 
-        // Lazy serialization: only serialize body if logging is enabled
         let request_body = if http_logger::is_enabled() {
             serde_json::to_string(&request).ok()
         } else {
             None
         };
 
-        let mut last_error = None;
+        let mut last_error_type = None;
+        let mut total_latency_ms = 0u64;
         let max_retries = 3;
 
         for attempt in 0..max_retries {
             let request_id = generate_request_id();
             let start_time = Instant::now();
 
-            // Build request log only if logging is enabled
             let http_request_log = if http_logger::is_enabled() {
                 Some(HttpRequestLog {
                     method: "POST".to_string(),
@@ -694,7 +802,7 @@ impl IndexManager {
                         USER_AGENT,
                         &request_id,
                         get_session_id(),
-                        &self.token,
+                        token,
                     ),
                     body: request_body.clone(),
                 })
@@ -702,20 +810,20 @@ impl IndexManager {
                 None
             };
 
-            let result = self
-                .client
+            let result = client
                 .post(&url)
                 .timeout(Duration::from_millis(timeout_ms))
                 .header("Content-Type", "application/json")
                 .header("User-Agent", USER_AGENT)
                 .header("x-request-id", &request_id)
                 .header("x-request-session-id", get_session_id())
-                .header("Authorization", format!("Bearer {}", self.token))
+                .header("Authorization", format!("Bearer {}", token))
                 .json(&request)
                 .send()
                 .await;
 
             let duration_ms = start_time.elapsed().as_millis() as u64;
+            total_latency_ms += duration_ms;
 
             match result {
                 Ok(response) => {
@@ -726,57 +834,59 @@ impl IndexManager {
                         Vec::new()
                     };
 
-                    if status == 401 {
+                    // Extract Retry-After header before consuming response
+                    let retry_after = response
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(1);
+
+                    if status == 401 || status == 403 {
                         if let Some(ref req_log) = http_request_log {
                             let response_log = HttpResponseLog {
                                 status: status.as_u16(),
                                 headers: response_headers,
-                                body: Some("Token invalid or expired".to_string()),
+                                body: Some("Auth error".to_string()),
                             };
                             http_logger::log_request(
-                                Some(&self.project_root),
+                                Some(project_root),
                                 req_log,
                                 Some(&response_log),
                                 duration_ms,
                                 None,
                             );
                         }
-                        return Err(anyhow!("Token invalid or expired"));
+                        return BatchUploadResult {
+                            blob_names: Vec::new(),
+                            latency_ms: total_latency_ms,
+                            error_type: Some(ErrorType::ClientError),
+                            success: false,
+                        };
                     }
-                    if status == 403 {
-                        if let Some(ref req_log) = http_request_log {
-                            let response_log = HttpResponseLog {
-                                status: status.as_u16(),
-                                headers: response_headers,
-                                body: Some("Access denied".to_string()),
-                            };
-                            http_logger::log_request(
-                                Some(&self.project_root),
-                                req_log,
-                                Some(&response_log),
-                                duration_ms,
-                                None,
-                            );
-                        }
-                        return Err(anyhow!("Access denied, token may be disabled"));
-                    }
+
                     if status == 400 {
                         let text = response.text().await.unwrap_or_default();
                         if let Some(ref req_log) = http_request_log {
                             let response_log = HttpResponseLog {
                                 status: 400,
                                 headers: response_headers,
-                                body: Some(text.clone()),
+                                body: Some(text),
                             };
                             http_logger::log_request(
-                                Some(&self.project_root),
+                                Some(project_root),
                                 req_log,
                                 Some(&response_log),
                                 duration_ms,
                                 None,
                             );
                         }
-                        return Err(anyhow!("Bad request: {}", text));
+                        return BatchUploadResult {
+                            blob_names: Vec::new(),
+                            latency_ms: total_latency_ms,
+                            error_type: Some(ErrorType::ClientError),
+                            success: false,
+                        };
                     }
 
                     if status.is_success() {
@@ -784,38 +894,37 @@ impl IndexManager {
                         if let Some(ref req_log) = http_request_log {
                             let response_log = HttpResponseLog {
                                 status: status.as_u16(),
-                                headers: response_headers,
+                                headers: response_headers.clone(),
                                 body: Some(body_text.clone()),
                             };
                             http_logger::log_request(
-                                Some(&self.project_root),
+                                Some(project_root),
                                 req_log,
                                 Some(&response_log),
                                 duration_ms,
                                 None,
                             );
                         }
-                        let resp: BatchUploadResponse = serde_json::from_str(&body_text)?;
-                        return Ok(resp.blob_names);
+                        if let Ok(resp) = serde_json::from_str::<BatchUploadResponse>(&body_text) {
+                            return BatchUploadResult {
+                                blob_names: resp.blob_names,
+                                latency_ms: total_latency_ms,
+                                error_type: None,
+                                success: true,
+                            };
+                        }
                     }
 
-                    // Handle rate limiting (429) with Retry-After header support
                     if status == 429 && attempt < max_retries - 1 {
-                        let retry_after = response
-                            .headers()
-                            .get("Retry-After")
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|v| v.parse::<u64>().ok())
-                            .unwrap_or(1);
                         let wait_time = retry_after * 1000;
                         if let Some(ref req_log) = http_request_log {
                             let response_log = HttpResponseLog {
                                 status: status.as_u16(),
-                                headers: response_headers,
+                                headers: response_headers.clone(),
                                 body: None,
                             };
                             http_logger::log_request(
-                                Some(&self.project_root),
+                                Some(project_root),
                                 req_log,
                                 Some(&response_log),
                                 duration_ms,
@@ -828,6 +937,7 @@ impl IndexManager {
                             max_retries,
                             wait_time
                         );
+                        last_error_type = Some(ErrorType::RateLimit);
                         tokio::time::sleep(Duration::from_millis(wait_time)).await;
                         continue;
                     }
@@ -837,11 +947,11 @@ impl IndexManager {
                         if let Some(ref req_log) = http_request_log {
                             let response_log = HttpResponseLog {
                                 status: status.as_u16(),
-                                headers: response_headers,
+                                headers: response_headers.clone(),
                                 body: None,
                             };
                             http_logger::log_request(
-                                Some(&self.project_root),
+                                Some(project_root),
                                 req_log,
                                 Some(&response_log),
                                 duration_ms,
@@ -854,6 +964,7 @@ impl IndexManager {
                             max_retries,
                             wait_time
                         );
+                        last_error_type = Some(ErrorType::ServerError);
                         tokio::time::sleep(Duration::from_millis(wait_time)).await;
                         continue;
                     }
@@ -865,26 +976,42 @@ impl IndexManager {
                             body: None,
                         };
                         http_logger::log_request(
-                            Some(&self.project_root),
+                            Some(project_root),
                             req_log,
                             Some(&response_log),
                             duration_ms,
                             Some(&format!("HTTP error: {}", status)),
                         );
                     }
-                    return Err(anyhow!("HTTP error: {}", status));
+
+                    return BatchUploadResult {
+                        blob_names: Vec::new(),
+                        latency_ms: total_latency_ms,
+                        error_type: if status == 429 {
+                            Some(ErrorType::RateLimit)
+                        } else if status.is_server_error() {
+                            Some(ErrorType::ServerError)
+                        } else {
+                            Some(ErrorType::ClientError)
+                        },
+                        success: false,
+                    };
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    let is_timeout =
+                        error_msg.contains("timeout") || error_msg.contains("timed out");
+
                     if let Some(ref req_log) = http_request_log {
                         http_logger::log_request(
-                            Some(&self.project_root),
+                            Some(project_root),
                             req_log,
                             None,
                             duration_ms,
                             Some(&error_msg),
                         );
                     }
+
                     if attempt < max_retries - 1 {
                         let wait_time = 1000 * (1 << attempt);
                         warn!(
@@ -896,15 +1023,22 @@ impl IndexManager {
                         );
                         tokio::time::sleep(Duration::from_millis(wait_time)).await;
                     }
-                    last_error = Some(error_msg);
+
+                    last_error_type = Some(if is_timeout {
+                        ErrorType::Timeout
+                    } else {
+                        ErrorType::NetworkError
+                    });
                 }
             }
         }
 
-        Err(anyhow!(
-            "All retries failed: {}",
-            last_error.unwrap_or_default()
-        ))
+        BatchUploadResult {
+            blob_names: Vec::new(),
+            latency_ms: total_latency_ms,
+            error_type: last_error_type,
+            success: false,
+        }
     }
 
     /// Index the project with mtime caching and parallel processing
@@ -1015,56 +1149,26 @@ impl IndexManager {
             new_blobs.len()
         );
 
-        // Step 5: Upload new blobs
+        // Step 5: Upload new blobs with adaptive strategy
         let mut uploaded_blob_names: Vec<String> = Vec::new();
         let mut failed_batch_count: usize = 0;
 
         if !new_blobs.is_empty() {
-            let strategy = get_upload_strategy(new_blobs.len());
-            info!(
-                "Project scale: {} (batch: {}, concurrency: {})",
-                strategy.scale_name, strategy.batch_size, strategy.concurrency
-            );
-
             let blobs_count = new_blobs.len();
-            let batches = self.build_batches(new_blobs, strategy.batch_size);
+            let mut strategy =
+                AdaptiveStrategy::new(blobs_count, self.cli_overrides.clone(), !self.no_adaptive);
 
             info!(
-                "Uploading {} new chunks in {} batches (concurrency: {})",
+                "Uploading {} new chunks (adaptive: {}, initial concurrency: {}, timeout: {}s)",
                 blobs_count,
-                batches.len(),
-                strategy.concurrency
+                !self.no_adaptive,
+                strategy.concurrency(),
+                strategy.timeout_ms() / 1000
             );
 
-            let total_batches = batches.len();
-            let timeout_ms = strategy.timeout_ms;
-            let concurrency = strategy.concurrency;
-
-            let upload_results: Vec<(usize, Result<Vec<String>>)> = stream::iter(
-                batches
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, batch)| async move {
-                        info!("Uploading batch {}/{}...", i + 1, total_batches);
-                        let result = self.upload_batch(&batch, timeout_ms).await;
-                        (i, result)
-                    }),
-            )
-            .buffer_unordered(concurrency)
-            .collect()
-            .await;
-
-            for (i, result) in upload_results {
-                match result {
-                    Ok(names) => {
-                        uploaded_blob_names.extend(names);
-                    }
-                    Err(e) => {
-                        error!("Batch {} upload failed: {}", i + 1, e);
-                        failed_batch_count += 1;
-                    }
-                }
-            }
+            let (names, failed) = self.upload_blobs_adaptive(new_blobs, &mut strategy).await;
+            uploaded_blob_names = names;
+            failed_batch_count = failed;
         } else {
             info!("No new files to upload, using cached index");
         }
@@ -1197,7 +1301,7 @@ impl IndexManager {
         let response = self
             .client
             .post(&url)
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(self.retrieval_timeout_secs))
             .header("Content-Type", "application/json")
             .header("User-Agent", USER_AGENT)
             .header("x-request-id", &request_id)

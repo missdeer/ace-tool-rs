@@ -2,12 +2,21 @@
 
 use ace_tool::config::{get_upload_strategy, Config};
 
+fn test_config(base_url: &str, token: &str) -> Result<std::sync::Arc<Config>, anyhow::Error> {
+    Config::new(
+        base_url.to_string(),
+        token.to_string(),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+}
+
 #[test]
 fn test_config_new_with_valid_inputs() {
-    let config = Config::new(
-        "https://api.example.com".to_string(),
-        "test-token".to_string(),
-    );
+    let config = test_config("https://api.example.com", "test-token");
     assert!(config.is_ok());
     let config = config.unwrap();
     assert_eq!(config.base_url, "https://api.example.com");
@@ -16,57 +25,64 @@ fn test_config_new_with_valid_inputs() {
 
 #[test]
 fn test_config_adds_https_prefix() {
-    let config = Config::new("api.example.com".to_string(), "test-token".to_string()).unwrap();
+    let config = test_config("api.example.com", "test-token").unwrap();
     assert_eq!(config.base_url, "https://api.example.com");
 }
 
 #[test]
 fn test_config_converts_http_to_https() {
-    let config = Config::new(
-        "http://api.example.com".to_string(),
-        "test-token".to_string(),
-    )
-    .unwrap();
+    let config = test_config("http://api.example.com", "test-token").unwrap();
     assert_eq!(config.base_url, "https://api.example.com");
 }
 
 #[test]
 fn test_config_removes_trailing_slash() {
-    let config = Config::new(
-        "https://api.example.com/".to_string(),
-        "test-token".to_string(),
-    )
-    .unwrap();
+    let config = test_config("https://api.example.com/", "test-token").unwrap();
     assert_eq!(config.base_url, "https://api.example.com");
 }
 
 #[test]
 fn test_config_removes_multiple_trailing_slashes() {
-    let config = Config::new(
-        "https://api.example.com///".to_string(),
-        "test-token".to_string(),
-    )
-    .unwrap();
+    let config = test_config("https://api.example.com///", "test-token").unwrap();
     assert_eq!(config.base_url, "https://api.example.com");
 }
 
 #[test]
 fn test_config_empty_token_fails() {
-    let config = Config::new("https://api.example.com".to_string(), "".to_string());
+    let config = test_config("https://api.example.com", "");
     assert!(config.is_err());
     assert!(config.unwrap_err().to_string().contains("token"));
 }
 
 #[test]
 fn test_config_default_values() {
+    let config = test_config("https://api.example.com", "test-token").unwrap();
+    assert_eq!(config.max_lines_per_blob, 800);
+    assert_eq!(config.retrieval_timeout_secs, 60);
+    assert!(!config.no_adaptive);
+    assert!(config.cli_overrides.upload_timeout_secs.is_none());
+    assert!(config.cli_overrides.upload_concurrency.is_none());
+    assert!(!config.text_extensions.is_empty());
+    assert!(!config.exclude_patterns.is_empty());
+}
+
+#[test]
+fn test_config_with_custom_values() {
     let config = Config::new(
         "https://api.example.com".to_string(),
         "test-token".to_string(),
+        Some(500),
+        Some(60),
+        Some(4),
+        Some(120),
+        true,
     )
     .unwrap();
-    assert_eq!(config.max_lines_per_blob, 800);
-    assert!(!config.text_extensions.is_empty());
-    assert!(!config.exclude_patterns.is_empty());
+    assert_eq!(config.max_lines_per_blob, 500);
+    assert_eq!(config.retrieval_timeout_secs, 120);
+    assert!(config.no_adaptive);
+    assert_eq!(config.cli_overrides.upload_timeout_secs, Some(60));
+    assert_eq!(config.cli_overrides.upload_concurrency, Some(4));
 }
 
 #[test]
@@ -143,11 +159,7 @@ fn test_upload_strategy_boundary_2000() {
 
 #[test]
 fn test_default_text_extensions_contains_common_types() {
-    let config = Config::new(
-        "https://api.example.com".to_string(),
-        "test-token".to_string(),
-    )
-    .unwrap();
+    let config = test_config("https://api.example.com", "test-token").unwrap();
     let extensions = &config.text_extensions;
     assert!(extensions.contains(".rs"));
     assert!(extensions.contains(".py"));
@@ -163,11 +175,7 @@ fn test_default_text_extensions_contains_common_types() {
 
 #[test]
 fn test_default_exclude_patterns_contains_common_dirs() {
-    let config = Config::new(
-        "https://api.example.com".to_string(),
-        "test-token".to_string(),
-    )
-    .unwrap();
+    let config = test_config("https://api.example.com", "test-token").unwrap();
     let patterns = &config.exclude_patterns;
     assert!(patterns.contains(&".git".to_string()));
     assert!(patterns.contains(&"node_modules".to_string()));

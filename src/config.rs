@@ -4,12 +4,22 @@ use anyhow::{anyhow, Result};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// CLI override configuration for upload parameters
+#[derive(Debug, Clone, Default)]
+pub struct CliOverrides {
+    pub upload_timeout_secs: Option<u64>,
+    pub upload_concurrency: Option<usize>,
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone)]
 pub struct Config {
     pub base_url: String,
     pub token: String,
     pub max_lines_per_blob: usize,
+    pub retrieval_timeout_secs: u64,
+    pub no_adaptive: bool,
+    pub cli_overrides: CliOverrides,
     pub text_extensions: HashSet<String>,
     pub text_filenames: HashSet<String>,
     pub exclude_patterns: Vec<String>,
@@ -25,7 +35,15 @@ pub struct UploadStrategy {
 }
 
 impl Config {
-    pub fn new(base_url: String, token: String) -> Result<Arc<Self>> {
+    pub fn new(
+        base_url: String,
+        token: String,
+        max_lines_per_blob: Option<usize>,
+        upload_timeout: Option<u64>,
+        upload_concurrency: Option<usize>,
+        retrieval_timeout: Option<u64>,
+        no_adaptive: bool,
+    ) -> Result<Arc<Self>> {
         // Ensure base_url uses https:// (using strip_prefix to avoid replacing http:// in path)
         let base_url = if let Some(rest) = base_url.strip_prefix("http://") {
             format!("https://{}", rest)
@@ -49,7 +67,13 @@ impl Config {
         Ok(Arc::new(Self {
             base_url,
             token,
-            max_lines_per_blob: 800,
+            max_lines_per_blob: max_lines_per_blob.unwrap_or(800),
+            retrieval_timeout_secs: retrieval_timeout.unwrap_or(60),
+            no_adaptive,
+            cli_overrides: CliOverrides {
+                upload_timeout_secs: upload_timeout,
+                upload_concurrency,
+            },
             text_extensions: default_text_extensions(),
             text_filenames: default_text_filenames(),
             exclude_patterns: default_exclude_patterns(),

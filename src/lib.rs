@@ -5,10 +5,11 @@ pub mod enhancer;
 pub mod http_logger;
 pub mod index;
 pub mod mcp;
+pub mod strategy;
 pub mod tools;
 pub mod utils;
 
 // Re-export commonly used types
-pub use config::{get_upload_strategy, Config, UploadStrategy};
+pub use config::{get_upload_strategy, CliOverrides, Config, UploadStrategy};
 pub use enhancer::PromptEnhancer;
 pub use index::{Blob, IndexManager, IndexResult, IndexStats};

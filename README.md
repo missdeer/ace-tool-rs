@@ -17,9 +17,9 @@ ace-tool-rs is a Rust implementation of a codebase context engine that enables A
 ## Features
 
 - **MCP Protocol Support** - Full JSON-RPC 2.0 implementation over stdio transport
-- **Adaptive Upload Strategy** - Automatically adjusts batch size and concurrency based on project size
+- **Adaptive Upload Strategy** - AIMD (Additive Increase, Multiplicative Decrease) algorithm dynamically adjusts concurrency and timeout based on runtime metrics
 - **Multi-encoding Support** - Handles UTF-8, GBK, GB18030, and Windows-1252 encoded files
-- **Concurrent Uploads** - Parallel batch uploads for faster indexing of large projects
+- **Concurrent Uploads** - Parallel batch uploads with sliding window for faster indexing of large projects
 - **Mtime Caching** - Tracks file modification times to avoid re-processing unchanged files
 - **Robust Error Handling** - Retry logic with exponential backoff and rate limiting support
 
@@ -59,6 +59,11 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--base-url` | API base URL for the indexing service |
 | `--token` | Authentication token for API access |
 | `--transport` | Transport framing: `auto` (default), `lsp`, `line` |
+| `--upload-timeout` | Override upload timeout in seconds (disables adaptive timeout) |
+| `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
+| `--no-adaptive` | Disable adaptive strategy, use static heuristic values |
+| `--max-lines-per-blob` | Maximum lines per blob chunk (default: 800) |
+| `--retrieval-timeout` | Search retrieval timeout in seconds (default: 180) |
 
 ### Environment Variables
 
@@ -232,6 +237,10 @@ ace-tool-rs/
 │   │   ├── mod.rs
 │   │   ├── server.rs    # MCP server implementation
 │   │   └── types.rs     # JSON-RPC types
+│   ├── strategy/
+│   │   ├── mod.rs
+│   │   ├── adaptive.rs  # AIMD algorithm implementation
+│   │   └── metrics.rs   # EWMA and runtime metrics
 │   ├── tools/
 │   │   ├── mod.rs
 │   │   └── search_context.rs  # Search tool implementation
@@ -246,16 +255,56 @@ ace-tool-rs/
     └── utils_test.rs
 ```
 
+## Adaptive Upload Strategy
+
+The tool uses an AIMD (Additive Increase, Multiplicative Decrease) algorithm inspired by TCP congestion control to dynamically optimize upload performance:
+
+### How It Works
+
+1. **Warmup Phase**: Starts with concurrency=1, evaluates success rate over 5-10 requests, then jumps to target concurrency if successful
+2. **Additive Increase**: When success rate > 95% and latency is healthy, concurrency increases by 1
+3. **Multiplicative Decrease**: When success rate < 70%, rate limited, or high latency, concurrency halves and timeout increases by 50%
+
+### Metrics
+
+- **EWMA Latency**: Exponentially weighted moving average (α=0.2) for latency smoothing
+- **Success Rate**: Calculated over a sliding window of 20 requests
+- **Latency Health**: Compared against a fixed baseline to detect degradation
+
+### Safety Bounds
+
+| Parameter | Minimum | Maximum |
+|-----------|---------|---------|
+| Concurrency | 1 | 8 |
+| Timeout | 15s | 180s |
+
+### CLI Overrides
+
+You can override individual parameters while keeping others adaptive:
+
+```bash
+# Fixed concurrency, adaptive timeout
+ace-tool-rs --base-url ... --token ... --upload-concurrency 4
+
+# Fixed timeout, adaptive concurrency
+ace-tool-rs --base-url ... --token ... --upload-timeout 60
+
+# Disable adaptive entirely (use static heuristic)
+ace-tool-rs --base-url ... --token ... --no-adaptive
+```
+
 ## Project Scale Strategies
 
-The tool automatically adapts its upload strategy based on project size:
+The tool uses heuristic-based initial values based on project size. With adaptive mode enabled (default), these serve as target values that the AIMD algorithm works toward:
 
-| Scale | Blob Count | Batch Size | Concurrency | Timeout |
-|-------|------------|------------|-------------|---------|
+| Scale | Blob Count | Batch Size | Target Concurrency | Target Timeout |
+|-------|------------|------------|-------------------|----------------|
 | Small | < 100 | 10 | 1 | 30s |
 | Medium | 100-499 | 30 | 2 | 45s |
 | Large | 500-1999 | 50 | 3 | 60s |
 | Extra Large | 2000+ | 70 | 4 | 90s |
+
+With `--no-adaptive`, these values are used directly without runtime adjustment.
 
 ## Development
 
@@ -290,7 +339,7 @@ cargo clippy
 
 ### Code Structure
 
-- **360+ unit tests** covering all major components
+- **390+ unit tests** covering all major components
 - Modular architecture with clear separation of concerns
 - Async/await throughout using Tokio runtime
 - Parallel file processing using Rayon
