@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["full"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bincode = "1"
 
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "brotli", "deflate", "http2", "charset", "rustls-tls-native-roots"] }

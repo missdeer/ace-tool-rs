@@ -515,32 +515,15 @@ fn test_load_index_with_wrong_version_returns_empty() {
 }
 
 #[test]
-fn test_load_index_v1_format_migration() {
+fn test_load_index_corrupted_data_returns_empty() {
     let temp_dir = TempDir::new().unwrap();
     let manager = create_test_manager(temp_dir.path().to_path_buf());
 
-    // Manually write old v1 format (Vec<String>)
+    // Write corrupted bincode data
     let ace_dir = temp_dir.path().join(".ace-tool");
     fs::create_dir_all(&ace_dir).unwrap();
-    let index_path = ace_dir.join("index.json");
-    let old_format = vec!["hash1", "hash2", "hash3"];
-    fs::write(&index_path, serde_json::to_string(&old_format).unwrap()).unwrap();
-
-    // Load should return empty index (migration triggers rebuild)
-    let loaded = manager.load_index();
-    assert!(loaded.entries.is_empty());
-}
-
-#[test]
-fn test_load_index_corrupted_json_returns_empty() {
-    let temp_dir = TempDir::new().unwrap();
-    let manager = create_test_manager(temp_dir.path().to_path_buf());
-
-    // Write corrupted JSON
-    let ace_dir = temp_dir.path().join(".ace-tool");
-    fs::create_dir_all(&ace_dir).unwrap();
-    let index_path = ace_dir.join("index.json");
-    fs::write(&index_path, "{ invalid json }").unwrap();
+    let index_path = ace_dir.join("index.bin");
+    fs::write(&index_path, b"invalid bincode data").unwrap();
 
     // Load should return empty index
     let loaded = manager.load_index();
@@ -574,7 +557,7 @@ fn test_save_index_creates_file() {
 
     manager.save_index(&index_data).unwrap();
 
-    let index_path = temp_dir.path().join(".ace-tool").join("index.json");
+    let index_path = temp_dir.path().join(".ace-tool").join("index.bin");
     assert!(index_path.exists());
 }
 
@@ -638,7 +621,7 @@ fn test_save_index_no_temp_file_left() {
 
     // Check no .tmp file exists
     let ace_dir = temp_dir.path().join(".ace-tool");
-    let tmp_path = ace_dir.join("index.json.tmp");
+    let tmp_path = ace_dir.join("index.bin.tmp");
     assert!(!tmp_path.exists());
 }
 

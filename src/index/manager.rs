@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
+use bincode::Options;
 use encoding_rs::{GB18030, GBK, UTF_8, WINDOWS_1252};
 use futures::stream::{FuturesUnordered, StreamExt};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -30,6 +31,9 @@ const MAX_BLOB_SIZE: usize = 500 * 1024;
 
 /// Maximum batch size in bytes (5MB)
 const MAX_BATCH_SIZE: usize = 5 * 1024 * 1024;
+
+/// Maximum index size in bytes (256MB)
+const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Current index format version
 const CURRENT_INDEX_VERSION: u32 = 2;
@@ -349,51 +353,63 @@ impl IndexManager {
         }
     }
 
-    /// Load index data from file (supports both v1 and v2 formats)
+    /// Load index data from file (bincode format)
     pub fn load_index(&self) -> IndexData {
         if !self.index_file_path.exists() {
             return IndexData::default();
         }
 
-        let content = match fs::read_to_string(&self.index_file_path) {
-            Ok(c) => c,
+        let metadata = match fs::metadata(&self.index_file_path) {
+            Ok(m) => m,
             Err(e) => {
-                error!("Failed to load index: {}", e);
+                error!("Failed to stat index file: {}", e);
                 return IndexData::default();
             }
         };
 
-        // Try to parse as new v2 format
-        if let Ok(data) = serde_json::from_str::<IndexData>(&content) {
-            // Check version and config hash
-            if data.version == CURRENT_INDEX_VERSION && data.config_hash == self.config_hash {
-                return data;
-            }
-            // Version or config mismatch, force rebuild
-            info!(
-                "Index version/config mismatch (v{} vs v{}, config {} vs {}), rebuilding",
-                data.version, CURRENT_INDEX_VERSION, data.config_hash, self.config_hash
+        if metadata.len() > MAX_INDEX_BYTES {
+            warn!(
+                "Index file too large ({} bytes), rebuilding",
+                metadata.len()
             );
             return IndexData::default();
         }
 
-        // Try to parse as old v1 format (Vec<String>), trigger full rebuild
-        if serde_json::from_str::<Vec<String>>(&content).is_ok() {
-            info!("Detected old index format (v1), migrating to v2");
-            return IndexData::default();
-        }
+        let bytes = match fs::read(&self.index_file_path) {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Failed to read index file: {}", e);
+                return IndexData::default();
+            }
+        };
 
-        warn!("Failed to parse index file, recreating");
-        IndexData::default()
+        let options = bincode::DefaultOptions::new().with_limit(bytes.len() as u64);
+        match options.deserialize::<IndexData>(&bytes) {
+            Ok(data) => {
+                if data.version == CURRENT_INDEX_VERSION && data.config_hash == self.config_hash {
+                    return data;
+                }
+                info!(
+                    "Index version/config mismatch (v{} vs v{}, config {} vs {}), rebuilding",
+                    data.version, CURRENT_INDEX_VERSION, data.config_hash, self.config_hash
+                );
+                IndexData::default()
+            }
+            Err(e) => {
+                warn!("Failed to deserialize index: {}, rebuilding", e);
+                IndexData::default()
+            }
+        }
     }
 
-    /// Save index data to file (atomic write)
+    /// Save index data to file (atomic write, bincode format)
     pub fn save_index(&self, data: &IndexData) -> Result<()> {
-        let content = serde_json::to_string_pretty(data)?;
-        let tmp_path = self.index_file_path.with_extension("json.tmp");
+        let options = bincode::DefaultOptions::new().with_limit(MAX_INDEX_BYTES);
+        let bytes = options.serialize(data)?;
+        let tmp_path = self.index_file_path.with_extension("bin.tmp");
 
         // Write to temporary file
-        fs::write(&tmp_path, &content)?;
+        fs::write(&tmp_path, &bytes)?;
 
         // Atomic rename (on Windows, need to remove target first)
         #[cfg(windows)]

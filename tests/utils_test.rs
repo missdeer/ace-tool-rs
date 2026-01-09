@@ -123,7 +123,7 @@ fn test_get_index_file_path() {
 
     assert_eq!(
         index_path,
-        temp_dir.path().join(".ace-tool").join("index.json")
+        temp_dir.path().join(".ace-tool").join("index.bin")
     );
     // The .ace-tool directory should have been created
     assert!(temp_dir.path().join(".ace-tool").exists());

@@ -64,5 +64,5 @@ fn gitignore_has_ace_tool(content: &str) -> bool {
 /// Get index file path
 pub fn get_index_file_path(project_root: &Path) -> PathBuf {
     let ace_dir = get_ace_dir(project_root);
-    ace_dir.join("index.json")
+    ace_dir.join("index.bin")
 }
