@@ -1,10 +1,12 @@
 //! ace-tool - MCP server for codebase indexing and semantic search
 
 use ace_tool::config::Config;
+use ace_tool::index::IndexManager;
 use ace_tool::mcp::{McpServer, TransportMode};
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use tracing::{error, info};
+use std::env;
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(ValueEnum, Debug, Copy, Clone)]
@@ -49,6 +51,10 @@ struct Args {
     /// Disable adaptive strategy
     #[arg(long, default_value = "false")]
     no_adaptive: bool,
+
+    /// Index-only mode: index current directory and exit (no MCP server)
+    #[arg(long, default_value = "false")]
+    index_only: bool,
 }
 
 #[tokio::main]
@@ -71,6 +77,52 @@ async fn main() -> Result<()> {
         args.retrieval_timeout,
         args.no_adaptive,
     )?;
+
+    // Index-only mode: index current directory and exit
+    if args.index_only {
+        info!("Index-only mode: indexing current directory");
+        let project_root = env::current_dir()?;
+        info!("Project root: {:?}", project_root);
+
+        let manager = IndexManager::new(config, project_root)?;
+        let result = manager.index_project().await;
+
+        match result.status.as_str() {
+            "success" => {
+                info!("Indexing completed successfully: {}", result.message);
+                if let Some(stats) = result.stats {
+                    info!(
+                        "Stats: {} total blobs, {} existing, {} new",
+                        stats.total_blobs, stats.existing_blobs, stats.new_blobs
+                    );
+                }
+                return Ok(());
+            }
+            "partial" => {
+                warn!("Indexing completed with warnings: {}", result.message);
+                if let Some(stats) = result.stats {
+                    if let Some(failed_batches) = stats.failed_batches {
+                        warn!(
+                            "Stats: {} total blobs, {} existing, {} new, {} failed batches",
+                            stats.total_blobs,
+                            stats.existing_blobs,
+                            stats.new_blobs,
+                            failed_batches
+                        );
+                    } else {
+                        warn!(
+                            "Stats: {} total blobs, {} existing, {} new",
+                            stats.total_blobs, stats.existing_blobs, stats.new_blobs
+                        );
+                    }
+                }
+                std::process::exit(2);
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Indexing failed: {}", result.message));
+            }
+        }
+    }
 
     info!("Starting ace-tool MCP server");
 

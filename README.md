@@ -62,6 +62,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-timeout` | Override upload timeout in seconds (disables adaptive timeout) |
 | `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
 | `--no-adaptive` | Disable adaptive strategy, use static heuristic values |
+| `--index-only` | Index current directory and exit (no MCP server) |
 | `--max-lines-per-blob` | Maximum lines per blob chunk (default: 800) |
 | `--retrieval-timeout` | Search retrieval timeout in seconds (default: 180) |
 
