@@ -1,5 +1,7 @@
 # ace-tool-rs
 
+English | [简体中文](README-zh-CN.md)
+
 A high-performance MCP (Model Context Protocol) server for codebase indexing, semantic search, and prompt enhancement, written in Rust.
 
 ## Overview
