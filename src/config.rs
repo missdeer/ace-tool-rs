@@ -79,6 +79,22 @@ impl Config {
             exclude_patterns: default_exclude_patterns(),
         }))
     }
+
+    /// Create a minimal config for third-party enhance-prompt mode
+    /// where base_url and token are not required (they come from environment variables)
+    pub fn new_for_third_party_enhancer() -> Arc<Self> {
+        Arc::new(Self {
+            base_url: String::new(),
+            token: String::new(),
+            max_lines_per_blob: 800,
+            retrieval_timeout_secs: 60,
+            no_adaptive: false,
+            cli_overrides: CliOverrides::default(),
+            text_extensions: default_text_extensions(),
+            text_filenames: default_text_filenames(),
+            exclude_patterns: default_exclude_patterns(),
+        })
+    }
 }
 
 /// Get adaptive upload strategy based on blob count

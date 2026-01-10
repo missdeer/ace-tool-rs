@@ -35,6 +35,18 @@ pub enum EnhancerEndpoint {
     Gemini,
 }
 
+impl std::fmt::Display for EnhancerEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::New => write!(f, "new"),
+            Self::Old => write!(f, "old"),
+            Self::Claude => write!(f, "claude"),
+            Self::OpenAI => write!(f, "openai"),
+            Self::Gemini => write!(f, "gemini"),
+        }
+    }
+}
+
 impl EnhancerEndpoint {
     /// Parse from environment variable string
     pub fn from_env_str(s: &str) -> Self {
@@ -65,7 +77,7 @@ pub struct ThirdPartyConfig {
 pub fn get_third_party_config(endpoint: EnhancerEndpoint) -> Result<ThirdPartyConfig> {
     let base_url = std::env::var(ENV_ENHANCER_BASE_URL).map_err(|_| {
         anyhow!(
-            "{} environment variable is required for {:?} endpoint",
+            "{} environment variable is required for '{}' endpoint",
             ENV_ENHANCER_BASE_URL,
             endpoint
         )
@@ -73,7 +85,7 @@ pub fn get_third_party_config(endpoint: EnhancerEndpoint) -> Result<ThirdPartyCo
 
     let token = std::env::var(ENV_ENHANCER_TOKEN).map_err(|_| {
         anyhow!(
-            "{} environment variable is required for {:?} endpoint",
+            "{} environment variable is required for '{}' endpoint",
             ENV_ENHANCER_TOKEN,
             endpoint
         )
@@ -82,7 +94,7 @@ pub fn get_third_party_config(endpoint: EnhancerEndpoint) -> Result<ThirdPartyCo
     let base_url = base_url.trim();
     if base_url.is_empty() {
         return Err(anyhow!(
-            "{} environment variable is required for {:?} endpoint",
+            "{} environment variable is required for '{}' endpoint",
             ENV_ENHANCER_BASE_URL,
             endpoint
         ));
@@ -91,7 +103,7 @@ pub fn get_third_party_config(endpoint: EnhancerEndpoint) -> Result<ThirdPartyCo
     let token = token.trim();
     if token.is_empty() {
         return Err(anyhow!(
-            "{} environment variable is required for {:?} endpoint",
+            "{} environment variable is required for '{}' endpoint",
             ENV_ENHANCER_TOKEN,
             endpoint
         ));
