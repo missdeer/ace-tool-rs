@@ -58,8 +58,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 
 | 参数 | 描述 |
 |------|------|
-| `--base-url` | 索引服务的 API 基础 URL |
-| `--token` | API 访问的认证令牌 |
+| `--base-url` | 索引服务的 API 基础 URL（使用第三方端点的 `--enhance-prompt` 模式时可选） |
+| `--token` | API 访问的认证令牌（使用第三方端点的 `--enhance-prompt` 模式时可选） |
 | `--transport` | 传输帧格式：`auto`（默认）、`lsp`、`line` |
 | `--upload-timeout` | 覆盖上传超时时间（秒），禁用自适应超时 |
 | `--upload-concurrency` | 覆盖上传并发度，禁用自适应并发 |
@@ -213,10 +213,17 @@ $ cat settings.local.json
 **使用 Claude API 的示例：**
 
 ```bash
+# MCP 服务器模式下，--base-url 和 --token 仍然是必需的
 export ACE_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --base-url https://api.example.com --token your-token
+
+# 使用第三方端点的 --enhance-prompt 模式下，--base-url 和 --token 是可选的
+export ACE_ENHANCER_ENDPOINT=claude
+export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
+export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
+ace-tool-rs --enhance-prompt "添加用户认证功能"
 ```
 
 ## 支持的文件类型

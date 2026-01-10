@@ -58,8 +58,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 
 | Argument | Description |
 |----------|-------------|
-| `--base-url` | API base URL for the indexing service |
-| `--token` | Authentication token for API access |
+| `--base-url` | API base URL for the indexing service (optional for `--enhance-prompt` with third-party endpoints) |
+| `--token` | Authentication token for API access (optional for `--enhance-prompt` with third-party endpoints) |
 | `--transport` | Transport framing: `auto` (default), `lsp`, `line` |
 | `--upload-timeout` | Override upload timeout in seconds (disables adaptive timeout) |
 | `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
@@ -213,10 +213,17 @@ The tool supports multiple backend endpoints, controlled by the `ACE_ENHANCER_EN
 **Example using Claude API:**
 
 ```bash
+# For MCP server mode, --base-url and --token are still required
 export ACE_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --base-url https://api.example.com --token your-token
+
+# For --enhance-prompt mode with third-party endpoints, --base-url and --token are optional
+export ACE_ENHANCER_ENDPOINT=claude
+export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
+export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
+ace-tool-rs --enhance-prompt "Add user authentication"
 ```
 
 ## Supported File Types
