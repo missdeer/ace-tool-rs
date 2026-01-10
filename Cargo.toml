@@ -3,7 +3,7 @@ name = "ace-tool-rs"
 version = "0.1.4"
 edition = "2021"
 description = "MCP server for codebase indexing, semantic search, and prompt enhancement"
-license = "MIT"
+license = "MIT OR LicenseRef-Commercial"
 authors = ["missdeer"]
 repository = "https://github.com/missdeer/ace-tool-rs.git"
 

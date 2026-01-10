@@ -401,7 +401,25 @@ cargo clippy
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is dual-licensed:
+
+### Non-Commercial / Personal Use - MIT License
+
+Free for personal projects, educational purposes, open source projects, and non-commercial use. See [LICENSE](LICENSE) for the full MIT license text.
+
+### Commercial / Workplace Use - Commercial License Required
+
+**If you use ace-tool-rs in a commercial environment, workplace, or for any commercial purpose, you must obtain a commercial license.**
+
+This includes but is not limited to:
+- Using the software at work (any organization)
+- Integrating into commercial products or services
+- Using for client work or consulting
+- Offering as part of a SaaS/cloud service
+
+**Contact**: missdeer@gmail.com for commercial licensing inquiries.
+
+See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for more details.
 
 ## Author
 
