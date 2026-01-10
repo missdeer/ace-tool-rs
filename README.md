@@ -63,6 +63,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
 | `--no-adaptive` | Disable adaptive strategy, use static heuristic values |
 | `--index-only` | Index current directory and exit (no MCP server) |
+| `--enhance-prompt` | Enhance a prompt and output the result to stdout, then exit |
 | `--max-lines-per-blob` | Maximum lines per blob chunk (default: 800) |
 | `--retrieval-timeout` | Search retrieval timeout in seconds (default: 180) |
 
@@ -71,7 +72,10 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Set log level (e.g., `info`, `debug`, `warn`) |
-| `ACE_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default, uses `/prompt-enhancer`) or `old` (uses `/chat-stream`) |
+| `ACE_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default), `old`, `claude`, `openai`, or `gemini` |
+| `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`) |
+| `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`) |
+| `PROMPT_ENHANCER_MODEL` | Model name override for third-party API (optional) |
 
 ### Example
 
@@ -186,12 +190,32 @@ Enhance user prompts by combining codebase context and conversation history to g
 
 **API Endpoints:**
 
-The tool supports two backend endpoints, controlled by the `ACE_ENHANCER_ENDPOINT` environment variable:
+The tool supports multiple backend endpoints, controlled by the `ACE_ENHANCER_ENDPOINT` environment variable:
 
-| Endpoint | Path | Description |
-|----------|------|-------------|
-| `new` (default) | `/prompt-enhancer` | Simplified request format, recommended |
-| `old` | `/chat-stream` | Full request with blobs, streaming response |
+| Endpoint | Description | Configuration |
+|----------|-------------|---------------|
+| `new` (default) | Augment `/prompt-enhancer` endpoint | Uses `--base-url` and `--token` CLI args |
+| `old` | Augment `/chat-stream` endpoint (streaming) | Uses `--base-url` and `--token` CLI args |
+| `claude` | Claude API (Anthropic) | Uses `PROMPT_ENHANCER_*` env vars |
+| `openai` | OpenAI API | Uses `PROMPT_ENHANCER_*` env vars |
+| `gemini` | Gemini API (Google) | Uses `PROMPT_ENHANCER_*` env vars |
+
+**Default Models for Third-Party APIs:**
+
+| Provider | Default Model |
+|----------|---------------|
+| Claude | `claude-sonnet-4-20250514` |
+| OpenAI | `gpt-4o` |
+| Gemini | `gemini-2.0-flash-exp` |
+
+**Example using Claude API:**
+
+```bash
+export ACE_ENHANCER_ENDPOINT=claude
+export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
+export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
+ace-tool-rs --base-url https://api.example.com --token your-token
+```
 
 ## Supported File Types
 
@@ -231,6 +255,10 @@ ace-tool-rs/
 │   ├── main.rs          # Entry point and CLI
 │   ├── lib.rs           # Library exports
 │   ├── config.rs        # Configuration and upload strategies
+│   ├── enhancer/
+│   │   ├── mod.rs
+│   │   ├── prompt_enhancer.rs  # Prompt enhancement orchestration
+│   │   └── templates.rs        # Enhancement prompt templates
 │   ├── index/
 │   │   ├── mod.rs
 │   │   └── manager.rs   # Core indexing and search logic
@@ -238,6 +266,13 @@ ace-tool-rs/
 │   │   ├── mod.rs
 │   │   ├── server.rs    # MCP server implementation
 │   │   └── types.rs     # JSON-RPC types
+│   ├── service/
+│   │   ├── mod.rs       # Service module exports
+│   │   ├── common.rs    # Shared types and utilities
+│   │   ├── augment.rs   # Augment New/Old endpoints
+│   │   ├── claude.rs    # Claude API (Anthropic)
+│   │   ├── openai.rs    # OpenAI API
+│   │   └── gemini.rs    # Gemini API (Google)
 │   ├── strategy/
 │   │   ├── mod.rs
 │   │   ├── adaptive.rs  # AIMD algorithm implementation
@@ -252,6 +287,8 @@ ace-tool-rs/
     ├── config_test.rs
     ├── index_test.rs
     ├── mcp_test.rs
+    ├── prompt_enhancer_test.rs
+    ├── third_party_api_test.rs
     ├── tools_test.rs
     └── utils_test.rs
 ```
