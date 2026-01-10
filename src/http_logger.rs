@@ -28,6 +28,7 @@ const SENSITIVE_HEADERS: &[&str] = &[
     "x-api-key",
     "x-auth-token",
     "proxy-authorization",
+    "x-goog-api-key",
 ];
 
 /// Global mutex for thread-safe log writing

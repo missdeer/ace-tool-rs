@@ -1,6 +1,7 @@
 //! ace-tool - MCP server for codebase indexing and semantic search
 
 use ace_tool::config::Config;
+use ace_tool::enhancer::prompt_enhancer::PromptEnhancer;
 use ace_tool::index::IndexManager;
 use ace_tool::mcp::{McpServer, TransportMode};
 use anyhow::Result;
@@ -55,6 +56,10 @@ struct Args {
     /// Index-only mode: index current directory and exit (no MCP server)
     #[arg(long, default_value = "false")]
     index_only: bool,
+
+    /// Enhance a prompt and output the result to stdout, then exit
+    #[arg(long)]
+    enhance_prompt: Option<String>,
 }
 
 #[tokio::main]
@@ -77,6 +82,22 @@ async fn main() -> Result<()> {
         args.retrieval_timeout,
         args.no_adaptive,
     )?;
+
+    // Enhance-prompt mode: enhance the prompt and output to stdout
+    if let Some(ref prompt) = args.enhance_prompt {
+        info!("Enhance-prompt mode: enhancing prompt");
+        let project_root = env::current_dir()?;
+        info!("Project root: {:?}", project_root);
+
+        let enhancer = PromptEnhancer::new(config.clone())?;
+        let enhanced = enhancer
+            .enhance_simple(prompt, "", Some(&project_root))
+            .await?;
+
+        // Output enhanced prompt to stdout
+        println!("{}", enhanced);
+        return Ok(());
+    }
 
     // Index-only mode: index current directory and exit
     if args.index_only {

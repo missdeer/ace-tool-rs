@@ -80,3 +80,5 @@ chrono = "0.4"
 [dev-dependencies]
 # Temporary directories for tests
 tempfile = "3"
+# HTTP mocking for API tests
+wiremock = "0.6"

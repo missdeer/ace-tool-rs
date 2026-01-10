@@ -5,6 +5,7 @@ pub mod enhancer;
 pub mod http_logger;
 pub mod index;
 pub mod mcp;
+pub mod service;
 pub mod strategy;
 pub mod tools;
 pub mod utils;

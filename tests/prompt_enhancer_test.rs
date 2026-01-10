@@ -1,10 +1,17 @@
 //! Tests for prompt_enhancer module
 
-use ace_tool::enhancer::prompt_enhancer::{
-    extract_enhanced_prompt, is_chinese_text, parse_chat_history, parse_streaming_response,
-    render_enhance_prompt, replace_tool_names, ChatMessage, DEFAULT_MODEL, ENV_ENHANCER_ENDPOINT,
-    NODE_ID_NEW, NODE_ID_OLD,
+use ace_tool::enhancer::prompt_enhancer::{get_enhancer_endpoint, ENV_ENHANCER_ENDPOINT};
+use ace_tool::service::{
+    extract_enhanced_prompt, get_third_party_config, is_chinese_text, parse_chat_history,
+    parse_streaming_response, render_enhance_prompt, replace_tool_names, ChatMessage,
+    EnhancerEndpoint, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_MODEL, DEFAULT_OPENAI_MODEL,
+    ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN, NODE_ID_NEW, NODE_ID_OLD,
 };
+use std::sync::Mutex;
+
+/// Global mutex for tests that modify environment variables
+/// All env-modifying tests must acquire this lock to prevent race conditions
+static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
 // ========================================================================
 // is_chinese_text Tests
@@ -471,85 +478,51 @@ fn test_full_workflow_simulation() {
 // ========================================================================
 
 #[test]
-fn test_use_new_endpoint_all_cases() {
-    use ace_tool::enhancer::prompt_enhancer::use_new_endpoint;
-
-    // Use a static mutex to prevent parallel execution issues
+fn test_get_enhancer_endpoint_all_cases() {
     use std::sync::Mutex;
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
     let _guard = ENV_MUTEX.lock().unwrap();
 
-    // Save original value to restore later
     let original_value = std::env::var(ENV_ENHANCER_ENDPOINT).ok();
 
-    // Test 1: Default should be new endpoint
+    // Test default
     std::env::remove_var(ENV_ENHANCER_ENDPOINT);
-    assert!(use_new_endpoint(), "Default should use new endpoint");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::New);
 
-    // Test 2: Explicit "new" should use new endpoint
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "new");
-    assert!(use_new_endpoint(), "\"new\" should use new endpoint");
-
-    // Test 3: Case insensitive - "NEW"
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "NEW");
-    assert!(use_new_endpoint(), "\"NEW\" should use new endpoint");
-
-    // Test 4: Case insensitive - "New"
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "New");
-    assert!(use_new_endpoint(), "\"New\" should use new endpoint");
-
-    // Test 5: Explicit "old" should use old endpoint
+    // Test each endpoint type
     std::env::set_var(ENV_ENHANCER_ENDPOINT, "old");
-    assert!(!use_new_endpoint(), "\"old\" should use old endpoint");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Old);
 
-    // Test 6: Explicit "OLD" should use old endpoint (case insensitive)
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "new");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::New);
+
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "claude");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Claude);
+
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "openai");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::OpenAI);
+
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "gemini");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Gemini);
+
+    // Edge cases
+    // Case insensitive
     std::env::set_var(ENV_ENHANCER_ENDPOINT, "OLD");
-    assert!(!use_new_endpoint(), "\"OLD\" should use old endpoint");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Old);
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "Old");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Old);
 
-    // Test 7: Invalid value should default to new endpoint
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "invalid");
-    assert!(use_new_endpoint(), "Invalid value should use new endpoint");
-
-    // Test 8: Whitespace should be trimmed
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "  new  ");
-    assert!(use_new_endpoint(), "Whitespace should be trimmed");
-
-    // Test 9: Empty string should use new endpoint
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "");
-    assert!(use_new_endpoint(), "Empty string should use new endpoint");
-
-    // Test 10: Whitespace only should use new endpoint
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "   ");
-    assert!(
-        use_new_endpoint(),
-        "Whitespace only should use new endpoint"
-    );
-
-    // Test 11: Newlines should be trimmed
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "\nnew\n");
-    assert!(use_new_endpoint(), "Newlines should be trimmed");
-
-    // Test 12: Mixed case variations
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "nEw");
-    assert!(use_new_endpoint(), "Mixed case nEw should work");
-
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "nEW");
-    assert!(use_new_endpoint(), "Mixed case nEW should work");
-
-    // Test 13: Explicit "old" with whitespace
+    // Whitespace
     std::env::set_var(ENV_ENHANCER_ENDPOINT, "  old  ");
-    assert!(!use_new_endpoint(), "\"  old  \" should use old endpoint");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::Old);
 
-    // Test 14: Tabs in value
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, "\told\t");
-    assert!(!use_new_endpoint(), "Tabs around old should be trimmed");
+    // Invalid value -> Default (New)
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "invalid");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::New);
 
-    // Test 15: Mixed whitespace around old
-    std::env::set_var(ENV_ENHANCER_ENDPOINT, " \t\nold\n\t ");
-    assert!(
-        !use_new_endpoint(),
-        "Mixed whitespace around old should be trimmed"
-    );
+    // Empty string -> Default (New)
+    std::env::set_var(ENV_ENHANCER_ENDPOINT, "");
+    assert_eq!(get_enhancer_endpoint(), EnhancerEndpoint::New);
 
     // Restore original value
     match original_value {
@@ -679,4 +652,241 @@ fn test_parse_streaming_response_empty_text() {
 {"text":"content"}"#;
     let result = parse_streaming_response(body).unwrap();
     assert_eq!(result, "content");
+}
+
+// ========================================================================
+// EnhancerEndpoint Tests
+// ========================================================================
+
+#[test]
+fn test_enhancer_endpoint_from_env_str() {
+    assert_eq!(EnhancerEndpoint::from_env_str("old"), EnhancerEndpoint::Old);
+    assert_eq!(EnhancerEndpoint::from_env_str("OLD"), EnhancerEndpoint::Old);
+    assert_eq!(EnhancerEndpoint::from_env_str("Old"), EnhancerEndpoint::Old);
+    assert_eq!(EnhancerEndpoint::from_env_str("new"), EnhancerEndpoint::New);
+    assert_eq!(EnhancerEndpoint::from_env_str("NEW"), EnhancerEndpoint::New);
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("claude"),
+        EnhancerEndpoint::Claude
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("CLAUDE"),
+        EnhancerEndpoint::Claude
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("Claude"),
+        EnhancerEndpoint::Claude
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("openai"),
+        EnhancerEndpoint::OpenAI
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("OPENAI"),
+        EnhancerEndpoint::OpenAI
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("OpenAI"),
+        EnhancerEndpoint::OpenAI
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("gemini"),
+        EnhancerEndpoint::Gemini
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("GEMINI"),
+        EnhancerEndpoint::Gemini
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("Gemini"),
+        EnhancerEndpoint::Gemini
+    );
+}
+
+#[test]
+fn test_enhancer_endpoint_from_env_str_with_whitespace() {
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("  claude  "),
+        EnhancerEndpoint::Claude
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("\topenai\n"),
+        EnhancerEndpoint::OpenAI
+    );
+    assert_eq!(
+        EnhancerEndpoint::from_env_str(" gemini "),
+        EnhancerEndpoint::Gemini
+    );
+}
+
+#[test]
+fn test_enhancer_endpoint_from_env_str_unknown() {
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("unknown"),
+        EnhancerEndpoint::New
+    );
+    assert_eq!(EnhancerEndpoint::from_env_str(""), EnhancerEndpoint::New);
+    assert_eq!(
+        EnhancerEndpoint::from_env_str("invalid"),
+        EnhancerEndpoint::New
+    );
+}
+
+#[test]
+fn test_enhancer_endpoint_is_third_party() {
+    assert!(!EnhancerEndpoint::New.is_third_party());
+    assert!(!EnhancerEndpoint::Old.is_third_party());
+    assert!(EnhancerEndpoint::Claude.is_third_party());
+    assert!(EnhancerEndpoint::OpenAI.is_third_party());
+    assert!(EnhancerEndpoint::Gemini.is_third_party());
+}
+
+// ========================================================================
+// ThirdPartyConfig Tests
+// ========================================================================
+
+#[test]
+fn test_get_third_party_config_missing_base_url() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    let orig_url = std::env::var(ENV_ENHANCER_BASE_URL).ok();
+    let orig_token = std::env::var(ENV_ENHANCER_TOKEN).ok();
+
+    std::env::remove_var(ENV_ENHANCER_BASE_URL);
+    std::env::set_var(ENV_ENHANCER_TOKEN, "test-token");
+
+    let result = get_third_party_config(EnhancerEndpoint::Claude);
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("PROMPT_ENHANCER_BASE_URL"));
+
+    // Restore
+    match orig_url {
+        Some(v) => std::env::set_var(ENV_ENHANCER_BASE_URL, v),
+        None => std::env::remove_var(ENV_ENHANCER_BASE_URL),
+    }
+    match orig_token {
+        Some(v) => std::env::set_var(ENV_ENHANCER_TOKEN, v),
+        None => std::env::remove_var(ENV_ENHANCER_TOKEN),
+    }
+}
+
+#[test]
+fn test_get_third_party_config_missing_token() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    let orig_url = std::env::var(ENV_ENHANCER_BASE_URL).ok();
+    let orig_token = std::env::var(ENV_ENHANCER_TOKEN).ok();
+
+    std::env::set_var(ENV_ENHANCER_BASE_URL, "https://api.example.com");
+    std::env::remove_var(ENV_ENHANCER_TOKEN);
+
+    let result = get_third_party_config(EnhancerEndpoint::Claude);
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("PROMPT_ENHANCER_TOKEN"));
+
+    // Restore
+    match orig_url {
+        Some(v) => std::env::set_var(ENV_ENHANCER_BASE_URL, v),
+        None => std::env::remove_var(ENV_ENHANCER_BASE_URL),
+    }
+    match orig_token {
+        Some(v) => std::env::set_var(ENV_ENHANCER_TOKEN, v),
+        None => std::env::remove_var(ENV_ENHANCER_TOKEN),
+    }
+}
+
+#[test]
+fn test_get_third_party_config_default_models() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    let orig_url = std::env::var(ENV_ENHANCER_BASE_URL).ok();
+    let orig_token = std::env::var(ENV_ENHANCER_TOKEN).ok();
+    let orig_model = std::env::var(ENV_ENHANCER_MODEL).ok();
+
+    std::env::set_var(ENV_ENHANCER_BASE_URL, "https://api.example.com/");
+    std::env::set_var(ENV_ENHANCER_TOKEN, "test-token");
+    std::env::remove_var(ENV_ENHANCER_MODEL);
+
+    // Test Claude default model
+    let config = get_third_party_config(EnhancerEndpoint::Claude).unwrap();
+    assert_eq!(config.model, DEFAULT_CLAUDE_MODEL);
+    assert_eq!(config.base_url, "https://api.example.com"); // trailing slash removed
+    assert_eq!(config.token, "test-token");
+
+    // Test OpenAI default model
+    let config = get_third_party_config(EnhancerEndpoint::OpenAI).unwrap();
+    assert_eq!(config.model, DEFAULT_OPENAI_MODEL);
+
+    // Test Gemini default model
+    let config = get_third_party_config(EnhancerEndpoint::Gemini).unwrap();
+    assert_eq!(config.model, DEFAULT_GEMINI_MODEL);
+
+    // Restore
+    match orig_url {
+        Some(v) => std::env::set_var(ENV_ENHANCER_BASE_URL, v),
+        None => std::env::remove_var(ENV_ENHANCER_BASE_URL),
+    }
+    match orig_token {
+        Some(v) => std::env::set_var(ENV_ENHANCER_TOKEN, v),
+        None => std::env::remove_var(ENV_ENHANCER_TOKEN),
+    }
+    match orig_model {
+        Some(v) => std::env::set_var(ENV_ENHANCER_MODEL, v),
+        None => std::env::remove_var(ENV_ENHANCER_MODEL),
+    }
+}
+
+#[test]
+fn test_get_third_party_config_custom_model() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    let orig_url = std::env::var(ENV_ENHANCER_BASE_URL).ok();
+    let orig_token = std::env::var(ENV_ENHANCER_TOKEN).ok();
+    let orig_model = std::env::var(ENV_ENHANCER_MODEL).ok();
+
+    std::env::set_var(ENV_ENHANCER_BASE_URL, "https://api.custom.com");
+    std::env::set_var(ENV_ENHANCER_TOKEN, "custom-token");
+    std::env::set_var(ENV_ENHANCER_MODEL, "custom-model-v1");
+
+    let config = get_third_party_config(EnhancerEndpoint::Claude).unwrap();
+    assert_eq!(config.model, "custom-model-v1");
+
+    // Restore
+    match orig_url {
+        Some(v) => std::env::set_var(ENV_ENHANCER_BASE_URL, v),
+        None => std::env::remove_var(ENV_ENHANCER_BASE_URL),
+    }
+    match orig_token {
+        Some(v) => std::env::set_var(ENV_ENHANCER_TOKEN, v),
+        None => std::env::remove_var(ENV_ENHANCER_TOKEN),
+    }
+    match orig_model {
+        Some(v) => std::env::set_var(ENV_ENHANCER_MODEL, v),
+        None => std::env::remove_var(ENV_ENHANCER_MODEL),
+    }
+}
+
+// ========================================================================
+// Environment Variable Constants Tests
+// ========================================================================
+
+#[test]
+fn test_env_var_constants() {
+    assert_eq!(ENV_ENHANCER_ENDPOINT, "ACE_ENHANCER_ENDPOINT");
+    assert_eq!(ENV_ENHANCER_BASE_URL, "PROMPT_ENHANCER_BASE_URL");
+    assert_eq!(ENV_ENHANCER_TOKEN, "PROMPT_ENHANCER_TOKEN");
+    assert_eq!(ENV_ENHANCER_MODEL, "PROMPT_ENHANCER_MODEL");
+}
+
+#[test]
+fn test_default_model_constants() {
+    assert_eq!(DEFAULT_CLAUDE_MODEL, "claude-sonnet-4-20250514");
+    assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-4o");
+    assert_eq!(DEFAULT_GEMINI_MODEL, "gemini-2.0-flash-exp");
 }
