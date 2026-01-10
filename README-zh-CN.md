@@ -403,9 +403,9 @@ cargo clippy
 
 本项目采用双许可证模式：
 
-### 非商业 / 个人使用 - MIT 许可证
+### 非商业 / 个人使用 - GNU General Public License v3.0
 
-可免费用于个人项目、教育目的、开源项目和非商业用途。完整的 MIT 许可证文本请参阅 [LICENSE](LICENSE)。
+可免费用于个人项目、教育目的、开源项目和非商业用途。完整的 GPLv3 许可证文本请参阅 [LICENSE](LICENSE)。
 
 ### 商业 / 工作场所使用 - 需要商业许可证
 

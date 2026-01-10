@@ -403,9 +403,9 @@ cargo clippy
 
 This project is dual-licensed:
 
-### Non-Commercial / Personal Use - MIT License
+### Non-Commercial / Personal Use - GNU General Public License v3.0
 
-Free for personal projects, educational purposes, open source projects, and non-commercial use. See [LICENSE](LICENSE) for the full MIT license text.
+Free for personal projects, educational purposes, open source projects, and non-commercial use. See [LICENSE](LICENSE) for the full GPLv3 license text.
 
 ### Commercial / Workplace Use - Commercial License Required
 
