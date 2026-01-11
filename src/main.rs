@@ -91,12 +91,14 @@ async fn main() -> Result<()> {
             Config::new_for_third_party_enhancer()
         } else {
             // For new/old endpoints, base_url and token are required
-            let base_url = args.base_url.clone().ok_or_else(|| {
-                anyhow!("--base-url is required for '{}' endpoint", endpoint)
-            })?;
-            let token = args.token.clone().ok_or_else(|| {
-                anyhow!("--token is required for '{}' endpoint", endpoint)
-            })?;
+            let base_url = args
+                .base_url
+                .clone()
+                .ok_or_else(|| anyhow!("--base-url is required for '{}' endpoint", endpoint))?;
+            let token = args
+                .token
+                .clone()
+                .ok_or_else(|| anyhow!("--token is required for '{}' endpoint", endpoint))?;
             Config::new(
                 base_url,
                 token,
@@ -119,12 +121,10 @@ async fn main() -> Result<()> {
     }
 
     // For non-enhance-prompt modes, base_url and token are always required
-    let base_url = args.base_url.ok_or_else(|| {
-        anyhow!("--base-url is required")
-    })?;
-    let token = args.token.ok_or_else(|| {
-        anyhow!("--token is required")
-    })?;
+    let base_url = args
+        .base_url
+        .ok_or_else(|| anyhow!("--base-url is required"))?;
+    let token = args.token.ok_or_else(|| anyhow!("--token is required"))?;
 
     // Initialize configuration
     let config = Config::new(

@@ -4,8 +4,9 @@ use ace_tool::enhancer::prompt_enhancer::{get_enhancer_endpoint, ENV_ENHANCER_EN
 use ace_tool::service::{
     extract_enhanced_prompt, get_third_party_config, is_chinese_text, parse_chat_history,
     parse_streaming_response, render_enhance_prompt, replace_tool_names, ChatMessage,
-    EnhancerEndpoint, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_MODEL, DEFAULT_OPENAI_MODEL,
-    ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN, NODE_ID_NEW, NODE_ID_OLD,
+    EnhancerEndpoint, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_MODEL,
+    DEFAULT_OPENAI_MODEL, ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN,
+    NODE_ID_NEW, NODE_ID_OLD,
 };
 use std::sync::Mutex;
 
