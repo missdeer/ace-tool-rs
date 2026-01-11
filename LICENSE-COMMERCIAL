@@ -2,7 +2,7 @@
 
 ## Overview
 
-ace-tool-rs is dual-licensed software. While it is available under the MIT License for non-commercial and personal use, **commercial and workplace use requires a separate commercial license**.
+ace-tool-rs is dual-licensed software. While it is available under the GPL v3 License for non-commercial and personal use, **commercial and workplace use requires a separate commercial license**.
 
 ## When You Need a Commercial License
 
@@ -16,7 +16,7 @@ A commercial license is required if you use ace-tool-rs in any of the following 
 
 ## When You DON'T Need a Commercial License
 
-The MIT License applies (free use) for:
+The GPL v3 License applies (free use) for:
 
 - **Personal Projects**: Individual, non-commercial hobby projects
 - **Educational Use**: Learning, teaching, and academic research
@@ -51,13 +51,13 @@ Commercial license pricing is flexible and depends on your specific use case and
 ## FAQ
 
 ### Q: Do I need a commercial license for personal side projects?
-A: No, personal projects are covered by the MIT License.
+A: No, personal projects are covered by the GPL v3 License.
 
 ### Q: What if I'm a freelancer using this for client work?
 A: Yes, you need a commercial license as this constitutes commercial use.
 
 ### Q: Can I evaluate the software before purchasing a license?
-A: Yes, evaluation and testing are allowed under the MIT License.
+A: Yes, evaluation and testing are allowed under the GPL v3 License.
 
 ### Q: What about using it in a non-profit organization?
 A: Workplace use in non-profit organizations still requires a commercial license.
