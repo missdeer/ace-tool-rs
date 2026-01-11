@@ -16,9 +16,9 @@ pub const ENV_ENHANCER_TOKEN: &str = "PROMPT_ENHANCER_TOKEN";
 pub const ENV_ENHANCER_MODEL: &str = "PROMPT_ENHANCER_MODEL";
 
 /// Default models for third-party APIs
-pub const DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-20250514";
-pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
-pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.0-flash-exp";
+pub const DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-5-20250929";
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2-codex";
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3-flash-preview";
 
 /// Enhancer endpoint type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

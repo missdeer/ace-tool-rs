@@ -887,7 +887,7 @@ fn test_env_var_constants() {
 
 #[test]
 fn test_default_model_constants() {
-    assert_eq!(DEFAULT_CLAUDE_MODEL, "claude-sonnet-4-20250514");
-    assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-4o");
-    assert_eq!(DEFAULT_GEMINI_MODEL, "gemini-2.0-flash-exp");
+    assert_eq!(DEFAULT_CLAUDE_MODEL, "claude-sonnet-4-5-20250929");
+    assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-5.2-codex");
+    assert_eq!(DEFAULT_GEMINI_MODEL, "gemini-3-flash-preview");
 }
