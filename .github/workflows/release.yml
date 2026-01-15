@@ -117,3 +117,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
+  publish-npm:
+    name: Publish to NPM
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Wait for GitHub Release CDN propagation
+        run: sleep 30
+
+      - name: Verify release assets are available
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          for asset in "ace-tool-rs_Linux_x86_64.tar.gz" "ace-tool-rs_Darwin_universal.tar.gz" "ace-tool-rs_Windows_x86_64.zip"; do
+            echo "Checking $asset..."
+            curl -sf -o /dev/null "https://github.com/missdeer/ace-tool-rs/releases/download/v${VERSION}/${asset}" || {
+              echo "Asset $asset not available yet"
+              exit 1
+            }
+          done
+          echo "All assets available"
+
+      - name: Update package version from tag
+        working-directory: npm
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm version $VERSION --no-git-tag-version --allow-same-version
+
+      - name: Publish to NPM
+        working-directory: npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
