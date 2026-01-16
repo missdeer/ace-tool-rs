@@ -27,6 +27,21 @@ ace-tool-rs is a Rust implementation of a codebase context engine that enables A
 
 ## Installation
 
+### Quick Start (Recommended)
+
+The easiest way to install and run ace-tool-rs is via npx:
+
+```bash
+npx ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
+```
+
+This will automatically download the appropriate binary for your platform and run it.
+
+**Supported platforms:**
+- Windows (x64)
+- macOS (x64, ARM64)
+- Linux (x64, ARM64)
+
 ### From Source
 
 ```bash
@@ -103,8 +118,8 @@ Add to your Codex config file (typically `~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.ace-tool]
-command = "/path/to/ace-tool-rs"
-args = ["--base-url", "https://api.example.com", "--token", "your-token-here", "--transport", "lsp"]
+command = "npx"
+args = ["ace-tool-rs", "--base-url", "https://api.example.com", "--token", "your-token-here", "--transport", "lsp"]
 env = { RUST_LOG = "info" }
 startup_timeout_ms = 60000
 ```
@@ -120,8 +135,9 @@ Add to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "ace-tool": {
-      "command": "/path/to/ace-tool-rs",
+      "command": "npx",
       "args": [
+        "ace-tool-rs",
         "--base-url", "https://api.example.com",
         "--token", "your-token-here"
       ]
@@ -135,7 +151,7 @@ Add to your Claude Desktop configuration file:
 Run command like below:
 
 ```bash
-claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"/path/to/ace-tool-rs","args":["--base-url",  "https://api.example.com/",  "--token", "your-token-here"],"env":{}}'
+claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"npx","args":["ace-tool-rs","--base-url","https://api.example.com/","--token","your-token-here"],"env":{}}'
 ```
 
 Modify `~/.claude/settings.json` to add permission for the tools:

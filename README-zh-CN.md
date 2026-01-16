@@ -27,6 +27,21 @@ ace-tool-rs 是一个 Rust 实现的代码库上下文引擎，使 AI 助手能�
 
 ## 安装
 
+### 快速开始（推荐）
+
+使用 npx 是安装和运行 ace-tool-rs 最简单的方式：
+
+```bash
+npx ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
+```
+
+这会自动下载适合你平台的二进制文件并运行。
+
+**支持的平台：**
+- Windows (x64)
+- macOS (x64, ARM64)
+- Linux (x64, ARM64)
+
 ### 从源码构建
 
 ```bash
@@ -103,8 +118,8 @@ ace-tool-rs --base-url https://api.example.com --token your-token-here --transpo
 
 ```toml
 [mcp_servers.ace-tool]
-command = "/path/to/ace-tool-rs"
-args = ["--base-url", "https://api.example.com", "--token", "your-token-here", "--transport", "lsp"]
+command = "npx"
+args = ["ace-tool-rs", "--base-url", "https://api.example.com", "--token", "your-token-here", "--transport", "lsp"]
 env = { RUST_LOG = "info" }
 startup_timeout_ms = 60000
 ```
@@ -120,8 +135,9 @@ startup_timeout_ms = 60000
 {
   "mcpServers": {
     "ace-tool": {
-      "command": "/path/to/ace-tool-rs",
+      "command": "npx",
       "args": [
+        "ace-tool-rs",
         "--base-url", "https://api.example.com",
         "--token", "your-token-here"
       ]
@@ -135,7 +151,7 @@ startup_timeout_ms = 60000
 运行以下命令：
 
 ```bash
-claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"/path/to/ace-tool-rs","args":["--base-url",  "https://api.example.com/",  "--token", "your-token-here"],"env":{}}'
+claude mcp add-json ace-tool --scope user '{"type":"stdio","command":"npx","args":["ace-tool-rs","--base-url","https://api.example.com/","--token","your-token-here"],"env":{}}'
 ```
 
 修改 `~/.claude/settings.json` 添加工具权限：
