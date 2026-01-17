@@ -88,19 +88,23 @@ function getAssetName() {
       // macOS uses universal binary (supports both x64 and arm64)
       return "ace-tool-rs_Darwin_universal.tar.gz";
     case "linux":
-      if (arch !== "x64") {
-        throw new Error(
-          `Unsupported architecture: ${arch} on Linux. Only x64 is supported.`
-        );
+      if (arch === "x64") {
+        return "ace-tool-rs_Linux_x86_64.tar.gz";
+      } else if (arch === "arm64") {
+        return "ace-tool-rs_Linux_aarch64.tar.gz";
       }
-      return "ace-tool-rs_Linux_x86_64.tar.gz";
+      throw new Error(
+        `Unsupported architecture: ${arch} on Linux. Only x64 and arm64 are supported.`
+      );
     case "win32":
-      if (arch !== "x64") {
-        throw new Error(
-          `Unsupported architecture: ${arch} on Windows. Only x64 is supported.`
-        );
+      if (arch === "x64") {
+        return "ace-tool-rs_Windows_x86_64.zip";
+      } else if (arch === "arm64") {
+        return "ace-tool-rs_Windows_aarch64.zip";
       }
-      return "ace-tool-rs_Windows_x86_64.zip";
+      throw new Error(
+        `Unsupported architecture: ${arch} on Windows. Only x64 and arm64 are supported.`
+      );
     default:
       throw new Error(`Unsupported platform: ${platform}`);
   }
