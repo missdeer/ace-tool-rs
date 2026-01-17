@@ -2,8 +2,13 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
@@ -23,18 +28,35 @@ jobs:
             artifact_name: ace-tool-rs
             asset_name: ace-tool-rs_Linux_x86_64.tar.gz
             universal: false
+            cross: false
+          # Linux aarch64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            artifact_name: ace-tool-rs
+            asset_name: ace-tool-rs_Linux_aarch64.tar.gz
+            universal: false
+            cross: true
           # macOS universal (x86_64 + aarch64)
           - target: universal-apple-darwin
             os: macos-latest
             artifact_name: ace-tool-rs
             asset_name: ace-tool-rs_Darwin_universal.tar.gz
             universal: true
+            cross: false
           # Windows x86_64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact_name: ace-tool-rs.exe
             asset_name: ace-tool-rs_Windows_x86_64.zip
             universal: false
+            cross: false
+          # Windows aarch64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: ace-tool-rs.exe
+            asset_name: ace-tool-rs_Windows_aarch64.zip
+            universal: false
+            cross: false
 
     steps:
       - name: Checkout
@@ -56,8 +78,16 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt update; sudo apt install musl-tools
 
+      - name: Install cross
+        if: matrix.cross == true
+        uses: taiki-e/install-action@cross
+
+      - name: Build (cross)
+        if: matrix.cross == true
+        run: cross build --release --target ${{ matrix.target }}
+
       - name: Build
-        if: matrix.universal != true
+        if: matrix.universal != true && matrix.cross != true
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build Universal Binary (macOS)
@@ -76,6 +106,9 @@ jobs:
             cd target/release
             strip ${{ matrix.artifact_name }}
             tar czf ../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
+          elif [ "${{ matrix.cross }}" == "true" ]; then
+            cd target/${{ matrix.target }}/release
+            tar czf ../../../${{ matrix.asset_name }} ${{ matrix.artifact_name }}
           else
             cd target/${{ matrix.target }}/release
             strip ${{ matrix.artifact_name }}
@@ -97,6 +130,7 @@ jobs:
 
   create-release:
     needs: build-release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -120,6 +154,7 @@ jobs:
   publish-npm:
     name: Publish to NPM
     needs: create-release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -137,7 +172,7 @@ jobs:
       - name: Verify release assets are available
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          for asset in "ace-tool-rs_Linux_x86_64.tar.gz" "ace-tool-rs_Darwin_universal.tar.gz" "ace-tool-rs_Windows_x86_64.zip"; do
+          for asset in "ace-tool-rs_Linux_x86_64.tar.gz" "ace-tool-rs_Linux_aarch64.tar.gz" "ace-tool-rs_Darwin_universal.tar.gz" "ace-tool-rs_Windows_x86_64.zip" "ace-tool-rs_Windows_aarch64.zip"; do
             echo "Checking $asset..."
             curl -sf -o /dev/null "https://github.com/missdeer/ace-tool-rs/releases/download/v${VERSION}/${asset}" || {
               echo "Asset $asset not available yet"
