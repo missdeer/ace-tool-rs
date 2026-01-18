@@ -22,7 +22,7 @@
     "cli"
   ],
   "bin": {
-    "ace-tool-rs": "./run.js"
+    "ace-tool-rs": "run.js"
   },
   "files": [
     "run.js"
