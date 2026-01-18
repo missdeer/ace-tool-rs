@@ -412,8 +412,8 @@ cargo clippy
 
 - Only processes the root `.gitignore` file (nested `.gitignore` files are not supported)
 - Requires network access to the indexing API
-- Maximum file size: 500KB per file
-- Maximum batch size: 5MB per upload batch
+- Maximum file size: 128KB per file
+- Maximum batch size: 1MB per upload batch
 
 ## License
 

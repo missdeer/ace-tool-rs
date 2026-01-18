@@ -26,11 +26,11 @@ use crate::strategy::{AdaptiveStrategy, ErrorType};
 use crate::utils::path_normalizer::{normalize_path, normalize_relative_path, RuntimeEnv};
 use crate::utils::project_detector::get_index_file_path;
 
-/// Maximum blob size in bytes (500KB)
-const MAX_BLOB_SIZE: usize = 500 * 1024;
+/// Maximum blob size in bytes (128KB, aligned with official augment.mjs)
+const MAX_BLOB_SIZE: usize = 128 * 1024;
 
-/// Maximum batch size in bytes (5MB)
-const MAX_BATCH_SIZE: usize = 5 * 1024 * 1024;
+/// Maximum batch size in bytes (1MB, aligned with official augment.mjs)
+const MAX_BATCH_SIZE: usize = 1024 * 1024;
 
 /// Maximum index size in bytes (256MB)
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
