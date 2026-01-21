@@ -450,3 +450,7 @@ cargo clippy
 3. 提交你的更改（`git commit -m 'Add some amazing feature'`）
 4. 推送到分支（`git push origin feature/amazing-feature`）
 5. 开启 Pull Request
+
+## Star 历史
+
+[![Star History Chart](https://starchart.cc/missdeer/ace-tool-rs.svg)](https://starchart.cc/missdeer/ace-tool-rs)
