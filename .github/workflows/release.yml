@@ -151,9 +151,75 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
-  publish-npm:
-    name: Publish to NPM
+  publish-npm-platforms:
+    name: Publish ${{ matrix.platform }} to NPM
     needs: create-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: linux-x64
+            asset: ace-tool-rs_Linux_x86_64.tar.gz
+            binary: ace-tool-rs
+          - platform: linux-arm64
+            asset: ace-tool-rs_Linux_aarch64.tar.gz
+            binary: ace-tool-rs
+          - platform: darwin-universal
+            asset: ace-tool-rs_Darwin_universal.tar.gz
+            binary: ace-tool-rs
+          - platform: win32-x64
+            asset: ace-tool-rs_Windows_x86_64.zip
+            binary: ace-tool-rs.exe
+          - platform: win32-arm64
+            asset: ace-tool-rs_Windows_aarch64.zip
+            binary: ace-tool-rs.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: .
+
+      - name: Extract and prepare package
+        run: |
+          cd npm/platforms/${{ matrix.platform }}
+          mkdir -p bin
+          # Extract binary to bin/
+          if [[ "${{ matrix.asset }}" == *.zip ]]; then
+            unzip ../../../${{ matrix.asset }} -d bin/
+          else
+            tar -xzf ../../../${{ matrix.asset }} -C bin/
+          fi
+          # Make binary executable (for Unix binaries)
+          if [[ "${{ matrix.binary }}" != *.exe ]]; then
+            chmod +x bin/${{ matrix.binary }}
+          fi
+          # Update version from tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm version $VERSION --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        run: |
+          cd npm/platforms/${{ matrix.platform }}
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-npm:
+    name: Publish main package to NPM
+    needs: publish-npm-platforms
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -166,29 +232,20 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Wait for GitHub Release CDN propagation
-        run: sleep 30
-
-      - name: Verify release assets are available
+      - name: Update version and publish
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          for asset in "ace-tool-rs_Linux_x86_64.tar.gz" "ace-tool-rs_Linux_aarch64.tar.gz" "ace-tool-rs_Darwin_universal.tar.gz" "ace-tool-rs_Windows_x86_64.zip" "ace-tool-rs_Windows_aarch64.zip"; do
-            echo "Checking $asset..."
-            curl -sf -o /dev/null "https://github.com/missdeer/ace-tool-rs/releases/download/v${VERSION}/${asset}" || {
-              echo "Asset $asset not available yet"
-              exit 1
-            }
-          done
-          echo "All assets available"
-
-      - name: Update package version from tag
-        working-directory: npm
-        run: |
+          cd npm/ace-tool-rs
           VERSION=${GITHUB_REF#refs/tags/v}
           npm version $VERSION --no-git-tag-version --allow-same-version
-
-      - name: Publish to NPM
-        working-directory: npm
-        run: npm publish --provenance --access public
+          # Sync optionalDependencies versions
+          node -e "
+            const fs = require('fs');
+            const pkg = require('./package.json');
+            for (const dep in pkg.optionalDependencies) {
+              pkg.optionalDependencies[dep] = '$VERSION';
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

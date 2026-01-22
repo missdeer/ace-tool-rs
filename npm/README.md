@@ -21,9 +21,9 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 
 | Platform | Architecture | Status |
 |----------|--------------|--------|
-| Windows  | x64          | Supported |
+| Windows  | x64, ARM64   | Supported |
 | macOS    | x64, ARM64   | Supported (universal binary) |
-| Linux    | x64          | Supported |
+| Linux    | x64, ARM64   | Supported |
 
 ## Cache Location
 
