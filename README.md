@@ -89,6 +89,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Set log level (e.g., `info`, `debug`, `warn`) |
+| `PROMPT_ENHANCER` | Control `enhance_prompt` tool exposure: set to `disabled`, `false`, `0`, or `off` to hide and disable the tool |
 | `ACE_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default), `old`, `claude`, `openai`, or `gemini` |
 | `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`) |
 | `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`) |

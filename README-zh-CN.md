@@ -89,6 +89,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | 变量 | 描述 |
 |------|------|
 | `RUST_LOG` | 设置日志级别（如 `info`、`debug`、`warn`） |
+| `PROMPT_ENHANCER` | 控制 `enhance_prompt` 工具的暴露：设置为 `disabled`、`false`、`0` 或 `off` 可隐藏并禁用该工具 |
 | `ACE_ENHANCER_ENDPOINT` | 端点选择：`new`（默认）、`old`、`claude`、`openai` 或 `gemini` |
 | `PROMPT_ENHANCER_BASE_URL` | 第三方 API 的基础 URL（`claude`/`openai`/`gemini` 必需） |
 | `PROMPT_ENHANCER_TOKEN` | 第三方 API 的密钥（`claude`/`openai`/`gemini` 必需） |
