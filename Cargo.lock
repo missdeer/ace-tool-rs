@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ace-tool-rs"
-version = "0.1.7"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "bincode",

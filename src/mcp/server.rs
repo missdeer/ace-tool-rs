@@ -353,7 +353,7 @@ impl McpServer {
             },
             server_info: ServerInfo {
                 name: "ace-tool".to_string(),
-                version: "0.1.8".to_string(),
+                version: "0.1.9".to_string(),
             },
         };
 

@@ -1,6 +1,6 @@
 {
   "name": "@ace-tool-rs/darwin-universal",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Platform-specific binary for ace-tool-rs (macOS Universal)",
   "license": "GPL-3.0-only",
   "repository": {
