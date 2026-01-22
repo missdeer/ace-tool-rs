@@ -145,7 +145,13 @@ jobs:
         run: |
           cd artifacts
           # Flatten artifacts (each artifact is in its own directory)
-          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
+          # Copy files to temp location first, then move to avoid directory name conflicts
+          mkdir -p ../temp_artifacts
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} ../temp_artifacts/ \;
+          # Remove artifact directories and move files back
+          rm -rf */
+          mv ../temp_artifacts/* .
+          rmdir ../temp_artifacts
           # Generate checksums
           sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
