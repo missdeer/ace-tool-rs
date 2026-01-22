@@ -62,3 +62,16 @@ cargo install ace-tool-rs
 GPL-3.0-only
 
 For commercial use, please contact missdeer@gmail.com for licensing options.
+
+## Verifying Downloads
+
+Each GitHub release includes a `SHA256SUMS` file for integrity verification:
+
+```bash
+# Download the binary and checksum file
+curl -LO https://github.com/missdeer/ace-tool-rs/releases/latest/download/ace-tool-rs_Linux_x86_64.tar.gz
+curl -LO https://github.com/missdeer/ace-tool-rs/releases/latest/download/SHA256SUMS
+
+# Verify the checksum
+sha256sum -c SHA256SUMS --ignore-missing
+```

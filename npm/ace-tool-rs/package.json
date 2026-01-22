@@ -34,6 +34,15 @@
   "engines": {
     "node": ">=14.14.0"
   },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "optionalDependencies": {
     "@ace-tool-rs/darwin-universal": "0.1.8",
     "@ace-tool-rs/linux-x64": "0.1.8",

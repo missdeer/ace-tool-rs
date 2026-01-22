@@ -1,4 +1,7 @@
-# ace-tool-rs npm shim
+# ace-tool-rs npm shim (Legacy)
+
+> **Note**: This directory contains the legacy "download-on-run" shim which is now marked as `private: true`.
+> The actual published package is in `npm/ace-tool-rs/` which uses the modern `optionalDependencies` approach.
 
 This npm package provides a convenient way to install and run `ace-tool-rs` via npm/npx.
 
