@@ -121,10 +121,17 @@ impl EnhancePromptTool {
             }
         };
 
-        match enhancer
-            .enhance(&prompt, &conversation_history, project_root.as_deref())
-            .await
-        {
+        let result = if self.config.no_webbrowser_enhance_prompt {
+            enhancer
+                .enhance_simple(&prompt, &conversation_history, project_root.as_deref())
+                .await
+        } else {
+            enhancer
+                .enhance(&prompt, &conversation_history, project_root.as_deref())
+                .await
+        };
+
+        match result {
             Ok(enhanced) => ToolResult { text: enhanced },
             Err(e) => {
                 error!("Enhancement failed: {}", e);

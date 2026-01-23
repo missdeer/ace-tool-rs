@@ -7,18 +7,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use ace_tool::config::Config;
+use ace_tool::config::{Config, ConfigOptions};
 use ace_tool::index::{Blob, FileEntry, IndexData, IndexManager, IndexResult, IndexStats};
 
 fn create_test_config() -> Arc<Config> {
     Config::new(
         "https://api.example.com".to_string(),
         "test-token".to_string(),
-        None,
-        None,
-        None,
-        None,
-        false,
+        ConfigOptions::default(),
     )
     .unwrap()
 }

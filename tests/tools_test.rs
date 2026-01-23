@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use ace_tool::config::Config;
+use ace_tool::config::{Config, ConfigOptions};
 use ace_tool::tools::search_context::{
     SearchContextArgs, SearchContextTool, SearchContextToolDef, ToolResult, SEARCH_CONTEXT_TOOL,
 };
@@ -12,11 +12,7 @@ fn create_test_config() -> Arc<Config> {
     Config::new(
         "https://api.example.com".to_string(),
         "test-token".to_string(),
-        None,
-        None,
-        None,
-        None,
-        false,
+        ConfigOptions::default(),
     )
     .unwrap()
 }

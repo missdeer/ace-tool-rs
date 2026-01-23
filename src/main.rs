@@ -1,6 +1,6 @@
 //! ace-tool - MCP server for codebase indexing and semantic search
 
-use ace_tool::config::Config;
+use ace_tool::config::{Config, ConfigOptions};
 use ace_tool::enhancer::prompt_enhancer::{get_enhancer_endpoint, PromptEnhancer};
 use ace_tool::index::IndexManager;
 use ace_tool::mcp::{McpServer, TransportMode};
@@ -54,6 +54,10 @@ struct Args {
     #[arg(long, default_value = "false")]
     no_adaptive: bool,
 
+    /// Disable web browser interaction for enhance_prompt, return API result directly
+    #[arg(long, default_value = "false")]
+    no_webbrowser_enhance_prompt: bool,
+
     /// Index-only mode: index current directory and exit (no MCP server)
     #[arg(long, default_value = "false")]
     index_only: bool,
@@ -102,11 +106,14 @@ async fn main() -> Result<()> {
             Config::new(
                 base_url,
                 token,
-                args.max_lines_per_blob,
-                args.upload_timeout,
-                args.upload_concurrency,
-                args.retrieval_timeout,
-                args.no_adaptive,
+                ConfigOptions {
+                    max_lines_per_blob: args.max_lines_per_blob,
+                    upload_timeout: args.upload_timeout,
+                    upload_concurrency: args.upload_concurrency,
+                    retrieval_timeout: args.retrieval_timeout,
+                    no_adaptive: args.no_adaptive,
+                    no_webbrowser_enhance_prompt: args.no_webbrowser_enhance_prompt,
+                },
             )?
         };
 
@@ -130,11 +137,14 @@ async fn main() -> Result<()> {
     let config = Config::new(
         base_url,
         token,
-        args.max_lines_per_blob,
-        args.upload_timeout,
-        args.upload_concurrency,
-        args.retrieval_timeout,
-        args.no_adaptive,
+        ConfigOptions {
+            max_lines_per_blob: args.max_lines_per_blob,
+            upload_timeout: args.upload_timeout,
+            upload_concurrency: args.upload_concurrency,
+            retrieval_timeout: args.retrieval_timeout,
+            no_adaptive: args.no_adaptive,
+            no_webbrowser_enhance_prompt: args.no_webbrowser_enhance_prompt,
+        },
     )?;
 
     // Index-only mode: index current directory and exit
