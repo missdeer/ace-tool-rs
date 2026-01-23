@@ -79,6 +79,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-timeout` | Override upload timeout in seconds (disables adaptive timeout) |
 | `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
 | `--no-adaptive` | Disable adaptive strategy, use static heuristic values |
+| `--no-webbrowser-enhance-prompt` | Disable web browser interaction for enhance_prompt, return API result directly |
 | `--index-only` | Index current directory and exit (no MCP server) |
 | `--enhance-prompt` | Enhance a prompt and output the result to stdout, then exit |
 | `--max-lines-per-blob` | Maximum lines per blob chunk (default: 800) |

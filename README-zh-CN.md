@@ -79,6 +79,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-timeout` | 覆盖上传超时时间（秒），禁用自适应超时 |
 | `--upload-concurrency` | 覆盖上传并发度，禁用自适应并发 |
 | `--no-adaptive` | 禁用自适应策略，使用静态启发式值 |
+| `--no-webbrowser-enhance-prompt` | 禁用 enhance_prompt 的浏览器交互，直接返回 API 结果 |
 | `--index-only` | 仅索引当前目录并退出（不启动 MCP 服务器） |
 | `--enhance-prompt` | 增强提示词并输出到标准输出，然后退出 |
 | `--max-lines-per-blob` | 每个 blob 块的最大行数（默认：800） |
