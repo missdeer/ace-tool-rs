@@ -1,6 +1,6 @@
 {
   "name": "ace-tool-rs",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "MCP server for codebase indexing, semantic search, and prompt enhancement",
   "repository": {
@@ -8,7 +8,7 @@
     "url": "git+https://github.com/missdeer/ace-tool-rs.git"
   },
   "author": "missdeer",
-  "license": "GPL-3.0-only",
+  "license": "GPL-3.0-only OR LicenseRef-Commercial",
   "bugs": {
     "url": "https://github.com/missdeer/ace-tool-rs/issues"
   },

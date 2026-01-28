@@ -1,6 +1,6 @@
 {
   "name": "ace-tool-rs",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "MCP server for codebase indexing, semantic search, and prompt enhancement",
   "publishConfig": {
     "access": "public"
@@ -10,7 +10,7 @@
     "url": "git+https://github.com/missdeer/ace-tool-rs.git"
   },
   "author": "missdeer",
-  "license": "GPL-3.0-only",
+  "license": "GPL-3.0-only OR LicenseRef-Commercial",
   "bugs": {
     "url": "https://github.com/missdeer/ace-tool-rs/issues"
   },
@@ -44,10 +44,10 @@
     "arm64"
   ],
   "optionalDependencies": {
-    "@ace-tool-rs/darwin-universal": "0.1.9",
-    "@ace-tool-rs/linux-x64": "0.1.9",
-    "@ace-tool-rs/linux-arm64": "0.1.9",
-    "@ace-tool-rs/win32-x64": "0.1.9",
-    "@ace-tool-rs/win32-arm64": "0.1.9"
+    "@ace-tool-rs/darwin-universal": "0.1.10",
+    "@ace-tool-rs/linux-x64": "0.1.10",
+    "@ace-tool-rs/linux-arm64": "0.1.10",
+    "@ace-tool-rs/win32-x64": "0.1.10",
+    "@ace-tool-rs/win32-arm64": "0.1.10"
   }
 }

@@ -1,8 +1,8 @@
 {
   "name": "@ace-tool-rs/linux-x64",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Platform-specific binary for ace-tool-rs (Linux x64)",
-  "license": "GPL-3.0-only",
+  "license": "GPL-3.0-only OR LicenseRef-Commercial",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/missdeer/ace-tool-rs.git"
