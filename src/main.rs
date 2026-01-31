@@ -58,6 +58,11 @@ struct Args {
     #[arg(long, default_value = "false")]
     no_webbrowser_enhance_prompt: bool,
 
+    /// Force using xdg-open instead of explorer.exe in WSL environment
+    /// Use this if WSL localhost forwarding is disabled and browser can't reach the WSL server
+    #[arg(long, default_value = "false")]
+    force_xdg_open: bool,
+
     /// Index-only mode: index current directory and exit (no MCP server)
     #[arg(long, default_value = "false")]
     index_only: bool,
@@ -113,6 +118,7 @@ async fn main() -> Result<()> {
                     retrieval_timeout: args.retrieval_timeout,
                     no_adaptive: args.no_adaptive,
                     no_webbrowser_enhance_prompt: args.no_webbrowser_enhance_prompt,
+                    force_xdg_open: args.force_xdg_open,
                 },
             )?
         };
@@ -144,6 +150,7 @@ async fn main() -> Result<()> {
             retrieval_timeout: args.retrieval_timeout,
             no_adaptive: args.no_adaptive,
             no_webbrowser_enhance_prompt: args.no_webbrowser_enhance_prompt,
+            force_xdg_open: args.force_xdg_open,
         },
     )?;
 

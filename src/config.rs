@@ -20,6 +20,8 @@ pub struct ConfigOptions {
     pub retrieval_timeout: Option<u64>,
     pub no_adaptive: bool,
     pub no_webbrowser_enhance_prompt: bool,
+    /// Force using xdg-open instead of explorer.exe in WSL
+    pub force_xdg_open: bool,
 }
 
 /// Main configuration struct
@@ -31,6 +33,8 @@ pub struct Config {
     pub retrieval_timeout_secs: u64,
     pub no_adaptive: bool,
     pub no_webbrowser_enhance_prompt: bool,
+    /// Force using xdg-open instead of explorer.exe in WSL
+    pub force_xdg_open: bool,
     pub cli_overrides: CliOverrides,
     pub text_extensions: HashSet<String>,
     pub text_filenames: HashSet<String>,
@@ -76,6 +80,7 @@ impl Config {
             retrieval_timeout_secs: options.retrieval_timeout.unwrap_or(60),
             no_adaptive: options.no_adaptive,
             no_webbrowser_enhance_prompt: options.no_webbrowser_enhance_prompt,
+            force_xdg_open: options.force_xdg_open,
             cli_overrides: CliOverrides {
                 upload_timeout_secs: options.upload_timeout,
                 upload_concurrency: options.upload_concurrency,
@@ -96,6 +101,7 @@ impl Config {
             retrieval_timeout_secs: 60,
             no_adaptive: false,
             no_webbrowser_enhance_prompt: true,
+            force_xdg_open: false,
             cli_overrides: CliOverrides::default(),
             text_extensions: default_text_extensions(),
             text_filenames: default_text_filenames(),

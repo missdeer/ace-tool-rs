@@ -33,12 +33,29 @@ impl RuntimeEnv {
 
     #[cfg(unix)]
     fn detect_unix() -> Self {
+        // Primary check: /proc/version contains WSL indicators
         if let Ok(version) = std::fs::read_to_string("/proc/version") {
             let lower = version.to_lowercase();
             if lower.contains("microsoft") || lower.contains("wsl") {
                 return RuntimeEnv::WslNative;
             }
         }
+
+        // Fallback check: WSL-specific environment variables
+        // WSL_INTEROP is set in WSL2 for Windows interop socket
+        // WSL_DISTRO_NAME is set to the distribution name
+        if std::env::var("WSL_INTEROP").is_ok() || std::env::var("WSL_DISTRO_NAME").is_ok() {
+            return RuntimeEnv::WslNative;
+        }
+
+        // Additional fallback: check /proc/sys/kernel/osrelease
+        if let Ok(osrelease) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+            let lower = osrelease.to_lowercase();
+            if lower.contains("microsoft") || lower.contains("wsl") {
+                return RuntimeEnv::WslNative;
+            }
+        }
+
         RuntimeEnv::Unix
     }
 }

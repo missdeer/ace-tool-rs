@@ -174,9 +174,35 @@ impl PromptEnhancer {
     }
 
     /// Open browser
+    /// On WSL, uses explorer.exe directly to open Windows default browser
+    /// unless force_xdg_open is set (useful when WSL localhost forwarding is disabled)
     fn open_browser(&self, url: &str) {
+        #[cfg(unix)]
+        {
+            use crate::utils::path_normalizer::RuntimeEnv;
+
+            // Skip WSL-specific handling if force_xdg_open is enabled
+            if !self.config.force_xdg_open && RuntimeEnv::detect() == RuntimeEnv::WslNative {
+                // In WSL, use explorer.exe to open URL in Windows default browser
+                info!("WSL detected, using explorer.exe (use --force-xdg-open to override)");
+                match std::process::Command::new("explorer.exe").arg(url).spawn() {
+                    Ok(_) => {
+                        info!("Opened browser via explorer.exe");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to open browser via explorer.exe: {}, URL: {}",
+                            e, url
+                        );
+                        // Fall through to open::that
+                    }
+                }
+            }
+        }
+
         if let Err(e) = open::that(url) {
-            warn!("Could not auto-open browser: {}", e);
+            warn!("Could not auto-open browser: {}, URL: {}", e, url);
             info!("Please manually open: {}", url);
         }
     }
