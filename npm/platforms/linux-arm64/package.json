@@ -1,6 +1,6 @@
 {
   "name": "@ace-tool-rs/linux-arm64",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Platform-specific binary for ace-tool-rs (Linux ARM64)",
   "license": "GPL-3.0-only OR LicenseRef-Commercial",
   "repository": {
