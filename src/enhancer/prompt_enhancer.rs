@@ -9,7 +9,7 @@
 //! - `gemini`: Uses Gemini API (Google)
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -24,6 +24,11 @@ use crate::service::{
 use crate::utils::project_detector::get_index_file_path;
 
 use super::server::EnhancerServer;
+
+/// Singleton EnhancerServer shared across all PromptEnhancer instances to prevent port leaks.
+/// Each `EnhancerServer::start()` binds a new port (3000-3099); without sharing, repeated
+/// `enhance_prompt` calls exhaust all available ports.
+static SHARED_SERVER: OnceLock<Arc<EnhancerServer>> = OnceLock::new();
 
 /// Environment variable to control which endpoint to use
 pub const ENV_ENHANCER_ENDPOINT: &str = "ACE_ENHANCER_ENDPOINT";
@@ -47,7 +52,9 @@ impl PromptEnhancer {
     pub fn new(config: Arc<Config>) -> Result<Self> {
         let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
 
-        let server = Arc::new(EnhancerServer::new());
+        let server = SHARED_SERVER
+            .get_or_init(|| Arc::new(EnhancerServer::new()))
+            .clone();
 
         Ok(Self {
             config,
