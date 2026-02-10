@@ -25,6 +25,7 @@ use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
 use crate::strategy::{AdaptiveStrategy, ErrorType};
 use crate::utils::path_normalizer::{normalize_path, normalize_relative_path, RuntimeEnv};
 use crate::utils::project_detector::get_index_file_path;
+use crate::USER_AGENT;
 
 /// Maximum blob size in bytes (128KB, aligned with official augment.mjs)
 const MAX_BLOB_SIZE: usize = 128 * 1024;
@@ -37,9 +38,6 @@ const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Current index format version
 const CURRENT_INDEX_VERSION: u32 = 2;
-
-/// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
-const USER_AGENT: &str = "augment.cli/0.12.0/mcp";
 
 /// Generate a unique request ID
 fn generate_request_id() -> String {

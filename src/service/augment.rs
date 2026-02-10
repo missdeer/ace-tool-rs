@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
+use crate::USER_AGENT;
 
 use super::common::{
     is_chinese_text, parse_chat_history, render_enhance_prompt, replace_tool_names, ChatMessage,
@@ -22,9 +23,6 @@ pub const NODE_ID_NEW: i32 = 0;
 
 /// Node ID for OLD endpoint
 pub const NODE_ID_OLD: i32 = 1;
-
-/// User-Agent header value (matches augment.mjs format: augment.cli/{version}/{mode})
-const USER_AGENT: &str = "augment.cli/0.12.0/mcp";
 
 /// Redacted token placeholder for logging
 const REDACTED_TOKEN: &str = "<redacted>";
