@@ -80,6 +80,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-concurrency` | 覆盖上传并发度，禁用自适应并发 |
 | `--no-adaptive` | 禁用自适应策略，使用静态启发式值 |
 | `--no-webbrowser-enhance-prompt` | 禁用 enhance_prompt 的浏览器交互，直接返回 API 结果 |
+| `--force-xdg-open` | 在 WSL 环境中强制使用 xdg-open 代替 explorer.exe |
+| `--webui-addr` | enhance_prompt Web UI 服务器的绑定地址和端口（如 `127.0.0.1:8754`、`0.0.0.0:3456`）。未指定时自动在 127.0.0.1 上选择可用端口。**警告：** 绑定到非回环地址会将无认证的 Web UI 暴露到网络中 |
 | `--index-only` | 仅索引当前目录并退出（不启动 MCP 服务器） |
 | `--enhance-prompt` | 增强提示词并输出到标准输出，然后退出 |
 | `--max-lines-per-blob` | 每个 blob 块的最大行数（默认：800） |
@@ -285,6 +287,7 @@ ace-tool-rs/
 │   ├── enhancer/
 │   │   ├── mod.rs
 │   │   ├── prompt_enhancer.rs  # 提示词增强编排
+│   │   ├── server.rs           # Web UI HTTP 服务器
 │   │   └── templates.rs        # 增强提示词模板
 │   ├── index/
 │   │   ├── mod.rs
@@ -312,6 +315,7 @@ ace-tool-rs/
 │       └── project_detector.rs  # 项目工具
 └── tests/               # 集成测试
     ├── config_test.rs
+    ├── enhancer_server_test.rs
     ├── index_test.rs
     ├── mcp_test.rs
     ├── prompt_enhancer_test.rs

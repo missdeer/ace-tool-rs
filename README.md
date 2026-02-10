@@ -80,6 +80,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `--upload-concurrency` | Override upload concurrency (disables adaptive concurrency) |
 | `--no-adaptive` | Disable adaptive strategy, use static heuristic values |
 | `--no-webbrowser-enhance-prompt` | Disable web browser interaction for enhance_prompt, return API result directly |
+| `--force-xdg-open` | Force using xdg-open instead of explorer.exe in WSL environment |
+| `--webui-addr` | Bind address and port for the enhance_prompt Web UI server (e.g., `127.0.0.1:8754`, `0.0.0.0:3456`). If not specified, automatically selects an available port on 127.0.0.1. **Warning:** binding to a non-loopback address exposes the unauthenticated Web UI to the network |
 | `--index-only` | Index current directory and exit (no MCP server) |
 | `--enhance-prompt` | Enhance a prompt and output the result to stdout, then exit |
 | `--max-lines-per-blob` | Maximum lines per blob chunk (default: 800) |
@@ -285,6 +287,7 @@ ace-tool-rs/
 │   ├── enhancer/
 │   │   ├── mod.rs
 │   │   ├── prompt_enhancer.rs  # Prompt enhancement orchestration
+│   │   ├── server.rs           # Web UI HTTP server
 │   │   └── templates.rs        # Enhancement prompt templates
 │   ├── index/
 │   │   ├── mod.rs
@@ -312,6 +315,7 @@ ace-tool-rs/
 │       └── project_detector.rs  # Project utilities
 └── tests/               # Integration tests
     ├── config_test.rs
+    ├── enhancer_server_test.rs
     ├── index_test.rs
     ├── mcp_test.rs
     ├── prompt_enhancer_test.rs

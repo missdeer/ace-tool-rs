@@ -22,6 +22,8 @@ pub struct ConfigOptions {
     pub no_webbrowser_enhance_prompt: bool,
     /// Force using xdg-open instead of explorer.exe in WSL
     pub force_xdg_open: bool,
+    /// Custom bind address for the web UI server (e.g., "127.0.0.1:8754", "0.0.0.0:3456")
+    pub webui_addr: Option<String>,
 }
 
 /// Main configuration struct
@@ -35,6 +37,8 @@ pub struct Config {
     pub no_webbrowser_enhance_prompt: bool,
     /// Force using xdg-open instead of explorer.exe in WSL
     pub force_xdg_open: bool,
+    /// Custom bind address for the web UI server
+    pub webui_addr: Option<String>,
     pub cli_overrides: CliOverrides,
     pub text_extensions: HashSet<String>,
     pub text_filenames: HashSet<String>,
@@ -81,6 +85,7 @@ impl Config {
             no_adaptive: options.no_adaptive,
             no_webbrowser_enhance_prompt: options.no_webbrowser_enhance_prompt,
             force_xdg_open: options.force_xdg_open,
+            webui_addr: options.webui_addr,
             cli_overrides: CliOverrides {
                 upload_timeout_secs: options.upload_timeout,
                 upload_concurrency: options.upload_concurrency,
@@ -102,6 +107,7 @@ impl Config {
             no_adaptive: false,
             no_webbrowser_enhance_prompt: true,
             force_xdg_open: false,
+            webui_addr: None,
             cli_overrides: CliOverrides::default(),
             text_extensions: default_text_extensions(),
             text_filenames: default_text_filenames(),

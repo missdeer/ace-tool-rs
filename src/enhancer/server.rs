@@ -63,74 +63,120 @@ struct SessionResponder {
 
 /// Enhancer HTTP Server
 pub struct EnhancerServer {
-    port: Arc<RwLock<u16>>,
+    /// The actual address the server is listening on (set after start).
+    /// Also serves as the "running" indicator: `Some` means server is running.
+    actual_addr: Arc<RwLock<Option<SocketAddr>>>,
     sessions: Arc<RwLock<HashMap<String, SessionData>>>,
     responders: Arc<Mutex<HashMap<String, SessionResponder>>>,
     enhance_callback: Arc<RwLock<Option<EnhanceCallback>>>,
-    running: Arc<RwLock<bool>>,
+    /// Custom bind address requested via --webui-addr (set before start)
+    bind_addr: Arc<RwLock<Option<SocketAddr>>>,
     pub timeout_ms: u64,
 }
 
 impl EnhancerServer {
     pub fn new() -> Self {
         Self {
-            port: Arc::new(RwLock::new(3000)),
+            actual_addr: Arc::new(RwLock::new(None)),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             responders: Arc::new(Mutex::new(HashMap::new())),
             enhance_callback: Arc::new(RwLock::new(None)),
-            running: Arc::new(RwLock::new(false)),
+            bind_addr: Arc::new(RwLock::new(None)),
             timeout_ms: 8 * 60 * 1000, // 8 minutes
         }
     }
 
-    /// Start HTTP server
+    /// Set custom bind address for the server.
+    /// Must be called before `start()`. Has no effect if the server is already running.
+    ///
+    /// Holds the `actual_addr` read lock while writing `bind_addr` to prevent a race
+    /// with `start()` (which holds the `actual_addr` write lock during the bind phase).
+    /// This ensures `set_bind_addr` either completes before `start()` reads `bind_addr`,
+    /// or blocks until `start()` finishes and then sees `actual_addr` is `Some`.
+    pub async fn set_bind_addr(&self, addr: SocketAddr) {
+        // Hold actual_addr read lock to mutually exclude with start()'s write lock.
+        let actual = self.actual_addr.read().await;
+        if actual.is_some() {
+            warn!("Server is already running, ignoring set_bind_addr");
+            return;
+        }
+        let mut bind_addr = self.bind_addr.write().await;
+        *bind_addr = Some(addr);
+        // Both locks are dropped here
+    }
+
+    /// Start HTTP server.
+    ///
+    /// Holds the `actual_addr` write lock through the bind phase so that concurrent
+    /// callers block until the server is fully ready (port is known). A second call
+    /// after the server is running returns immediately.
     pub async fn start(&self) -> Result<()> {
-        {
-            let mut running = self.running.write().await;
-            if *running {
-                return Ok(()); // Already running
-            }
-            *running = true;
+        // Hold actual_addr write lock for the entire bind+set phase.
+        // Concurrent callers will block here until actual_addr is populated.
+        let mut actual = self.actual_addr.write().await;
+        if actual.is_some() {
+            return Ok(()); // Already running
         }
 
-        let mut port = *self.port.read().await;
-        let mut listener: Option<TcpListener> = None;
+        let custom_addr = *self.bind_addr.read().await;
+        let listener: TcpListener;
 
-        // Try to bind to port, increment if in use
-        for _ in 0..100 {
-            match TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await {
+        if let Some(addr) = custom_addr {
+            // Warn if binding to a non-loopback address (security risk)
+            if !addr.ip().is_loopback() {
+                warn!(
+                    "Binding to non-loopback address {}. The Web UI has no authentication \
+                     and will be accessible from the network.",
+                    addr
+                );
+            }
+            // Use the user-specified address directly
+            match TcpListener::bind(addr).await {
                 Ok(l) => {
-                    listener = Some(l);
-                    break;
+                    listener = l;
                 }
                 Err(e) => {
-                    if e.kind() == std::io::ErrorKind::AddrInUse {
-                        warn!("Port {} is in use, trying {}", port, port + 1);
-                        port += 1;
-                    } else {
-                        let mut running = self.running.write().await;
-                        *running = false;
-                        return Err(anyhow!("Failed to bind to port: {}", e));
+                    return Err(anyhow!("Failed to bind to {}: {}", addr, e));
+                }
+            }
+        } else {
+            // Auto-select: try ports 3000-3099 on 127.0.0.1
+            let mut port: u16 = 3000;
+            let mut bound: Option<TcpListener> = None;
+
+            for _ in 0..100 {
+                match TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await {
+                    Ok(l) => {
+                        bound = Some(l);
+                        break;
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::AddrInUse {
+                            warn!("Port {} is in use, trying {}", port, port + 1);
+                            port += 1;
+                        } else {
+                            return Err(anyhow!("Failed to bind to port: {}", e));
+                        }
                     }
                 }
             }
+
+            listener = match bound {
+                Some(l) => l,
+                None => {
+                    return Err(anyhow!("Could not find available port"));
+                }
+            };
         }
 
-        let listener = match listener {
-            Some(l) => l,
-            None => {
-                let mut running = self.running.write().await;
-                *running = false;
-                return Err(anyhow!("Could not find available port"));
-            }
-        };
+        // Use local_addr() as the source of truth for the actual bound address
+        // (handles port 0 → ephemeral port assignment correctly)
+        let local_addr = listener.local_addr()?;
+        *actual = Some(local_addr);
+        // Release the write lock now — concurrent callers can proceed
+        drop(actual);
 
-        {
-            let mut port_lock = self.port.write().await;
-            *port_lock = port;
-        }
-
-        info!("Enhancer server started: http://localhost:{}", port);
+        info!("Enhancer server started: http://{}", local_addr);
 
         // Clone references for the server task
         let sessions = self.sessions.clone();
@@ -177,9 +223,31 @@ impl EnhancerServer {
         Ok(())
     }
 
-    /// Get server port
+    /// Get server port (from actual bound address)
     pub async fn get_port(&self) -> u16 {
-        *self.port.read().await
+        match *self.actual_addr.read().await {
+            Some(addr) => addr.port(),
+            None => 0,
+        }
+    }
+
+    /// Get the host string for browser URL (from actual bound address).
+    /// - Unspecified addresses (0.0.0.0, ::) are replaced with "localhost"
+    /// - IPv6 addresses are wrapped in brackets for URL compatibility
+    pub async fn get_host(&self) -> String {
+        match *self.actual_addr.read().await {
+            Some(addr) => {
+                let ip = addr.ip();
+                if ip.is_unspecified() {
+                    "localhost".to_string()
+                } else if ip.is_ipv6() {
+                    format!("[{}]", ip)
+                } else {
+                    ip.to_string()
+                }
+            }
+            None => "localhost".to_string(),
+        }
     }
 
     /// Create new session and return a receiver for the result

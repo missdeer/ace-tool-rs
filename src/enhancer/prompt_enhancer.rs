@@ -8,6 +8,7 @@
 //! - `openai`: Uses OpenAI API
 //! - `gemini`: Uses Gemini API (Google)
 
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -136,6 +137,14 @@ impl PromptEnhancer {
         conversation_history: &str,
         blob_names: &[String],
     ) -> Result<String> {
+        // Set custom bind address if configured
+        if let Some(ref addr_str) = self.config.webui_addr {
+            let addr: SocketAddr = addr_str
+                .parse()
+                .map_err(|e| anyhow!("Invalid --webui-addr '{}': {}", addr_str, e))?;
+            self.server.set_bind_addr(addr).await;
+        }
+
         // Start server
         self.server.start().await?;
 
@@ -152,7 +161,8 @@ impl PromptEnhancer {
 
         // Build URL
         let port = self.server.get_port().await;
-        let url = format!("http://localhost:{}/enhance?session={}", port, session_id);
+        let host = self.server.get_host().await;
+        let url = format!("http://{}:{}/enhance?session={}", host, port, session_id);
         info!("Please open in browser: {}", url);
 
         // Try to open browser

@@ -156,10 +156,11 @@ fn test_enhancer_server_default() {
 }
 
 #[tokio::test]
-async fn test_enhancer_server_get_port_default() {
+async fn test_enhancer_server_get_port_before_start() {
     let server = EnhancerServer::new();
     let port = server.get_port().await;
-    assert_eq!(port, 3000);
+    // Before start(), no actual address is bound, so port is 0
+    assert_eq!(port, 0);
 }
 
 #[tokio::test]
@@ -376,4 +377,211 @@ fn test_timeout_is_8_minutes() {
     let server = EnhancerServer::new();
     // The timeout is 8 * 60 * 1000 = 480000 ms
     assert_eq!(server.timeout_ms, 8 * 60 * 1000);
+}
+
+// ========================================================================
+// Bind Address Tests
+// ========================================================================
+
+#[tokio::test]
+async fn test_set_bind_addr() {
+    let server = EnhancerServer::new();
+    let addr: std::net::SocketAddr = "127.0.0.1:8754".parse().unwrap();
+    server.set_bind_addr(addr).await;
+    // Before start, port should still be 0 (no actual binding yet)
+    assert_eq!(server.get_port().await, 0);
+}
+
+#[tokio::test]
+async fn test_get_host_before_start() {
+    let server = EnhancerServer::new();
+    // Before start, host should default to "localhost"
+    assert_eq!(server.get_host().await, "localhost");
+}
+
+#[tokio::test]
+async fn test_start_with_custom_addr() {
+    let server = EnhancerServer::new();
+    // Use port 0 to let OS assign an ephemeral port
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    server.set_bind_addr(addr).await;
+    server.start().await.unwrap();
+
+    // Port should be non-zero (OS-assigned ephemeral port)
+    let port = server.get_port().await;
+    assert_ne!(port, 0, "Port should be assigned by OS, not 0");
+
+    // Host should be 127.0.0.1
+    let host = server.get_host().await;
+    assert_eq!(host, "127.0.0.1");
+}
+
+#[tokio::test]
+async fn test_start_auto_select() {
+    let server = EnhancerServer::new();
+    server.start().await.unwrap();
+
+    let port = server.get_port().await;
+    assert!(
+        (3000..3100).contains(&port),
+        "Port should be in 3000-3099 range, got {}",
+        port
+    );
+
+    let host = server.get_host().await;
+    assert_eq!(host, "127.0.0.1");
+}
+
+#[tokio::test]
+async fn test_set_bind_addr_ignored_when_running() {
+    let server = EnhancerServer::new();
+    // Use port 0 for ephemeral port
+    let addr1: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    server.set_bind_addr(addr1).await;
+    server.start().await.unwrap();
+
+    let port_before = server.get_port().await;
+
+    // Try to change bind address after start — should be ignored
+    let addr2: std::net::SocketAddr = "127.0.0.1:9999".parse().unwrap();
+    server.set_bind_addr(addr2).await;
+
+    // Port should remain unchanged
+    let port_after = server.get_port().await;
+    assert_eq!(port_before, port_after);
+}
+
+#[tokio::test]
+async fn test_ipv6_host_bracketed() {
+    let server = EnhancerServer::new();
+    let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+    server.set_bind_addr(addr).await;
+    server.start().await.unwrap();
+
+    let host = server.get_host().await;
+    assert_eq!(host, "[::1]", "IPv6 address should be bracketed for URL");
+
+    let port = server.get_port().await;
+    assert_ne!(port, 0);
+}
+
+#[tokio::test]
+async fn test_unspecified_addr_maps_to_localhost() {
+    let server = EnhancerServer::new();
+    let addr: std::net::SocketAddr = "0.0.0.0:0".parse().unwrap();
+    server.set_bind_addr(addr).await;
+    server.start().await.unwrap();
+
+    let host = server.get_host().await;
+    assert_eq!(
+        host, "localhost",
+        "0.0.0.0 should map to localhost for browser URL"
+    );
+}
+
+#[tokio::test]
+async fn test_ipv6_unspecified_maps_to_localhost() {
+    let server = EnhancerServer::new();
+    let addr: std::net::SocketAddr = "[::]:0".parse().unwrap();
+    server.set_bind_addr(addr).await;
+    server.start().await.unwrap();
+
+    let host = server.get_host().await;
+    assert_eq!(
+        host, "localhost",
+        "[::] should map to localhost for browser URL"
+    );
+}
+
+#[test]
+fn test_webui_addr_parsing_valid() {
+    // Test that valid address strings parse correctly
+    let valid_addrs = vec![
+        "127.0.0.1:8754",
+        "0.0.0.0:3456",
+        "192.168.1.1:8080",
+        "[::1]:8080",
+        "[::]:3000",
+    ];
+    for addr_str in valid_addrs {
+        let result: Result<std::net::SocketAddr, _> = addr_str.parse();
+        assert!(result.is_ok(), "Should parse '{}' successfully", addr_str);
+    }
+}
+
+#[test]
+fn test_webui_addr_parsing_invalid() {
+    // Test that invalid address strings fail to parse
+    let invalid_addrs = vec![
+        "not-an-address",
+        "127.0.0.1",       // missing port
+        ":8080",           // missing host
+        "127.0.0.1:99999", // port out of range
+    ];
+    for addr_str in invalid_addrs {
+        let result: Result<std::net::SocketAddr, _> = addr_str.parse();
+        assert!(result.is_err(), "Should fail to parse '{}'", addr_str);
+    }
+}
+
+// ========================================================================
+// Concurrent Race Regression Tests
+// ========================================================================
+
+/// Regression test: set_bind_addr() racing with start() must not silently lose the address.
+/// Either the custom address is used, or the server starts with the default — but the
+/// actual_addr must always be populated and get_port() must never return 0.
+#[tokio::test]
+async fn test_set_bind_addr_concurrent_with_start() {
+    use std::sync::Arc;
+
+    let server = Arc::new(EnhancerServer::new());
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+
+    let server1 = server.clone();
+    let server2 = server.clone();
+
+    // Race set_bind_addr and start concurrently
+    let (_, start_result) = tokio::join!(
+        async move { server1.set_bind_addr(addr).await },
+        async move { server2.start().await },
+    );
+
+    // start() must succeed
+    start_result.unwrap();
+
+    // After both complete, actual_addr must be populated (port != 0)
+    let port = server.get_port().await;
+    assert_ne!(port, 0, "Port must be non-zero after start() completes");
+
+    // Host must be a valid value (not empty)
+    let host = server.get_host().await;
+    assert!(!host.is_empty(), "Host must be non-empty after start()");
+}
+
+/// Regression test: multiple concurrent start() calls must all succeed and agree on the port.
+#[tokio::test]
+async fn test_concurrent_start_calls() {
+    use std::sync::Arc;
+
+    let server = Arc::new(EnhancerServer::new());
+
+    let s1 = server.clone();
+    let s2 = server.clone();
+    let s3 = server.clone();
+
+    let (r1, r2, r3) = tokio::join!(
+        async move { s1.start().await },
+        async move { s2.start().await },
+        async move { s3.start().await },
+    );
+
+    // All must succeed
+    r1.unwrap();
+    r2.unwrap();
+    r3.unwrap();
+
+    // All must agree on the same port
+    let port = server.get_port().await;
+    assert_ne!(port, 0, "Port must be non-zero after concurrent starts");
 }
