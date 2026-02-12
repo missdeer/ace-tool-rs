@@ -93,7 +93,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 |----------|-------------|
 | `RUST_LOG` | Set log level (e.g., `info`, `debug`, `warn`) |
 | `PROMPT_ENHANCER` | Control `enhance_prompt` tool exposure: set to `disabled`, `false`, `0`, or `off` to hide and disable the tool |
-| `ACE_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default), `old`, `claude`, `openai`, or `gemini` |
+| `PROMPT_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default), `old`, `claude`, `openai`, or `gemini` (also reads `ACE_ENHANCER_ENDPOINT` as fallback) |
 | `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`) |
 | `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`) |
 | `PROMPT_ENHANCER_MODEL` | Model name override for third-party API (optional) |
@@ -212,7 +212,7 @@ Enhance user prompts by combining codebase context and conversation history to g
 
 **API Endpoints:**
 
-The tool supports multiple backend endpoints, controlled by the `ACE_ENHANCER_ENDPOINT` environment variable:
+The tool supports multiple backend endpoints, controlled by the `PROMPT_ENHANCER_ENDPOINT` environment variable (with `ACE_ENHANCER_ENDPOINT` as a backward-compatible fallback):
 
 | Endpoint | Description | Configuration |
 |----------|-------------|---------------|
@@ -234,13 +234,13 @@ The tool supports multiple backend endpoints, controlled by the `ACE_ENHANCER_EN
 
 ```bash
 # For MCP server mode, --base-url and --token are still required
-export ACE_ENHANCER_ENDPOINT=claude
+export PROMPT_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --base-url https://api.example.com --token your-token
 
 # For --enhance-prompt mode with third-party endpoints, --base-url and --token are optional
-export ACE_ENHANCER_ENDPOINT=claude
+export PROMPT_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --enhance-prompt "Add user authentication"

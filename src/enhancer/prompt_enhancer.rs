@@ -1,7 +1,8 @@
 //! Prompt Enhancer - Core enhancement logic
 //! Based on Augment VSCode plugin implementation
 //!
-//! Supports multiple API endpoints controlled by environment variable `ACE_ENHANCER_ENDPOINT`:
+//! Supports multiple API endpoints controlled by environment variable `PROMPT_ENHANCER_ENDPOINT`
+//! (with `ACE_ENHANCER_ENDPOINT` as a backward-compatible fallback):
 //! - `new`: Uses Augment /prompt-enhancer endpoint (default)
 //! - `old`: Uses Augment /chat-stream endpoint
 //! - `claude`: Uses Claude API (Anthropic)
@@ -31,12 +32,19 @@ use super::server::EnhancerServer;
 /// `enhance_prompt` calls exhaust all available ports.
 static SHARED_SERVER: OnceLock<Arc<EnhancerServer>> = OnceLock::new();
 
-/// Environment variable to control which endpoint to use
-pub const ENV_ENHANCER_ENDPOINT: &str = "ACE_ENHANCER_ENDPOINT";
+/// Environment variable to control which endpoint to use (primary)
+pub const ENV_ENHANCER_ENDPOINT: &str = "PROMPT_ENHANCER_ENDPOINT";
+
+/// Legacy environment variable for backward compatibility
+pub const ENV_ENHANCER_ENDPOINT_LEGACY: &str = "ACE_ENHANCER_ENDPOINT";
 
 /// Get the configured enhancer endpoint type
+///
+/// Checks `PROMPT_ENHANCER_ENDPOINT` first, then falls back to `ACE_ENHANCER_ENDPOINT`
+/// for backward compatibility.
 pub fn get_enhancer_endpoint() -> EnhancerEndpoint {
     std::env::var(ENV_ENHANCER_ENDPOINT)
+        .or_else(|_| std::env::var(ENV_ENHANCER_ENDPOINT_LEGACY))
         .map(|v| EnhancerEndpoint::from_env_str(&v))
         .unwrap_or(EnhancerEndpoint::New)
 }
