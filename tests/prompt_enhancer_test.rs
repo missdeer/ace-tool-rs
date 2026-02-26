@@ -6,9 +6,9 @@ use ace_tool::enhancer::prompt_enhancer::{
 use ace_tool::service::{
     extract_enhanced_prompt, get_third_party_config, is_chinese_text, parse_chat_history,
     parse_streaming_response, render_enhance_prompt, replace_tool_names, ChatMessage,
-    EnhancerEndpoint, DEFAULT_CLAUDE_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_MODEL,
-    DEFAULT_OPENAI_MODEL, ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN,
-    NODE_ID_NEW, NODE_ID_OLD,
+    EnhancerEndpoint, DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, DEFAULT_GEMINI_MODEL,
+    DEFAULT_MODEL, DEFAULT_OPENAI_MODEL, ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL,
+    ENV_ENHANCER_TOKEN, NODE_ID_NEW, NODE_ID_OLD,
 };
 use std::sync::Mutex;
 
@@ -912,7 +912,8 @@ fn test_env_var_constants() {
 
 #[test]
 fn test_default_model_constants() {
-    assert_eq!(DEFAULT_CLAUDE_MODEL, "claude-sonnet-4-5-20250929");
-    assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-5.2-codex");
+    assert_eq!(DEFAULT_CLAUDE_MODEL, "claude-sonnet-4-5");
+    assert_eq!(DEFAULT_OPENAI_MODEL, "gpt-5.2");
     assert_eq!(DEFAULT_GEMINI_MODEL, "gemini-3-flash-preview");
+    assert_eq!(DEFAULT_CODEX_MODEL, "gpt-5.3-codex");
 }
