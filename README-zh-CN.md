@@ -94,8 +94,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `RUST_LOG` | 设置日志级别（如 `info`、`debug`、`warn`） |
 | `PROMPT_ENHANCER` | 控制 `enhance_prompt` 工具的暴露：设置为 `disabled`、`false`、`0` 或 `off` 可隐藏并禁用该工具 |
 | `PROMPT_ENHANCER_ENDPOINT` | 端点选择：`new`（默认）、`old`、`claude`、`openai`、`gemini` 或 `codex`（同时支持 `ACE_ENHANCER_ENDPOINT` 作为向后兼容） |
-| `PROMPT_ENHANCER_BASE_URL` | 第三方 API 的基础 URL（`claude`/`openai`/`gemini` 必需） |
-| `PROMPT_ENHANCER_TOKEN` | 第三方 API 的密钥（`claude`/`openai`/`gemini` 必需） |
+| `PROMPT_ENHANCER_BASE_URL` | 第三方 API 的基础 URL（`claude`/`openai`/`gemini`/`codex` 必需） |
+| `PROMPT_ENHANCER_TOKEN` | 第三方 API 的密钥（`claude`/`openai`/`gemini`/`codex` 必需） |
 | `PROMPT_ENHANCER_MODEL` | 第三方 API 的模型名称覆盖（可选） |
 
 ### 示例
@@ -218,9 +218,9 @@ $ cat settings.local.json
 |------|------|----------|
 | `new`（默认） | Augment `/prompt-enhancer` 端点 | 使用 `--base-url` 和 `--token` CLI 参数 |
 | `old` | Augment `/chat-stream` 端点（流式） | 使用 `--base-url` 和 `--token` CLI 参数 |
-| `claude` | Claude API (Anthropic) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
-| `openai` | OpenAI API (`/v1/chat/completions`) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
-| `gemini` | Gemini API (Google) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
+| `claude` | Claude API (Anthropic `/v1/messages`) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
+| `openai` | OpenAI Chat API (ChatGPT `/v1/chat/completions`) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
+| `gemini` | Gemini API (Google `/v1beta/models/<model>:streamGenerateContent`) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
 | `codex` | Codex API (OpenAI Responses API `/v1/responses`) | 使用 `PROMPT_ENHANCER_*` 环境变量 |
 
 **第三方 API 默认模型：**

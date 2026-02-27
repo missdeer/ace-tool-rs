@@ -94,8 +94,8 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `RUST_LOG` | Set log level (e.g., `info`, `debug`, `warn`) |
 | `PROMPT_ENHANCER` | Control `enhance_prompt` tool exposure: set to `disabled`, `false`, `0`, or `off` to hide and disable the tool |
 | `PROMPT_ENHANCER_ENDPOINT` | Endpoint selection: `new` (default), `old`, `claude`, `openai`, `gemini`, or `codex` (also reads `ACE_ENHANCER_ENDPOINT` as fallback) |
-| `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`) |
-| `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`) |
+| `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`/`codex`) |
+| `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`/`codex`) |
 | `PROMPT_ENHANCER_MODEL` | Model name override for third-party API (optional) |
 
 ### Example
@@ -218,9 +218,9 @@ The tool supports multiple backend endpoints, controlled by the `PROMPT_ENHANCER
 |----------|-------------|---------------|
 | `new` (default) | Augment `/prompt-enhancer` endpoint | Uses `--base-url` and `--token` CLI args |
 | `old` | Augment `/chat-stream` endpoint (streaming) | Uses `--base-url` and `--token` CLI args |
-| `claude` | Claude API (Anthropic) | Uses `PROMPT_ENHANCER_*` env vars |
-| `openai` | OpenAI API (`/v1/chat/completions`) | Uses `PROMPT_ENHANCER_*` env vars |
-| `gemini` | Gemini API (Google) | Uses `PROMPT_ENHANCER_*` env vars |
+| `claude` | Claude API (Anthropic `/v1/messages`) | Uses `PROMPT_ENHANCER_*` env vars |
+| `openai` | OpenAI API (ChatGPT `/v1/chat/completions`) | Uses `PROMPT_ENHANCER_*` env vars |
+| `gemini` | Gemini API (Google `/v1beta/models/<model>:streamGenerateContent`) | Uses `PROMPT_ENHANCER_*` env vars |
 | `codex` | Codex API (OpenAI Responses API `/v1/responses`) | Uses `PROMPT_ENHANCER_*` env vars |
 
 **Default Models for Third-Party APIs:**
