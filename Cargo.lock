@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ace-tool-rs"
-version = "0.1.14"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "bincode",
@@ -13,6 +13,7 @@ dependencies = [
  "encoding_rs",
  "encoding_rs_io",
  "futures",
+ "globset",
  "hex",
  "http-body-util",
  "hyper",

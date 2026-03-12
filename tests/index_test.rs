@@ -932,3 +932,453 @@ fn test_index_result_error() {
     assert_eq!(result.status, "error");
     assert!(result.stats.is_none());
 }
+
+// ============================================================================
+// SearchFilterOptions integration tests
+// ============================================================================
+
+use ace_tool::search_filter::SearchFilterOptions;
+
+#[test]
+fn test_filter_blob_hashes_by_extension() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "src/main.rs".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_rs".to_string()],
+        },
+    );
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_md".to_string()],
+        },
+    );
+    entries.insert(
+        "notes.txt".to_string(),
+        FileEntry {
+            mtime_secs: 3000,
+            mtime_nanos: 0,
+            size: 300,
+            blob_hashes: vec!["hash_txt".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude .md and .txt
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_extensions.insert(".md".to_string());
+    filter.exclude_extensions.insert(".txt".to_string());
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    assert_eq!(filtered.len(), 1);
+    assert!(filtered.contains(&"hash_rs".to_string()));
+    assert!(!filtered.contains(&"hash_md".to_string()));
+    assert!(!filtered.contains(&"hash_txt".to_string()));
+}
+
+#[test]
+fn test_filter_blob_hashes_by_glob() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "src/main.rs".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_src".to_string()],
+        },
+    );
+    entries.insert(
+        "docs/guide.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_docs".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude docs/**
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_globs = vec!["docs/**".to_string()];
+    filter.compile_globs().unwrap();
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    assert_eq!(filtered.len(), 1);
+    assert!(filtered.contains(&"hash_src".to_string()));
+}
+
+#[test]
+fn test_filter_blob_hashes_empty_result() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_md".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude .md
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_extensions.insert(".md".to_string());
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    assert!(filtered.is_empty());
+}
+
+#[test]
+fn test_filter_blob_hashes_no_filter() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "src/main.rs".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash1".to_string()],
+        },
+    );
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash2".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // No filter
+    let filter = SearchFilterOptions::default();
+    let all_hashes = index.get_filtered_blob_hashes(&filter);
+    assert_eq!(all_hashes.len(), 2);
+}
+
+#[test]
+fn test_filter_blob_hashes_chunked_files() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "large_file.md".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 10000,
+            blob_hashes: vec![
+                "chunk1_hash".to_string(),
+                "chunk2_hash".to_string(),
+                "chunk3_hash".to_string(),
+            ],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude .md
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_extensions.insert(".md".to_string());
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    // All chunks should be excluded
+    assert!(filtered.is_empty());
+}
+
+#[test]
+fn test_filter_case_insensitive_extension() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "README.MD".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_upper".to_string()],
+        },
+    );
+    entries.insert(
+        "notes.TxT".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_mixed".to_string()],
+        },
+    );
+    entries.insert(
+        "guide.md".to_string(),
+        FileEntry {
+            mtime_secs: 3000,
+            mtime_nanos: 0,
+            size: 300,
+            blob_hashes: vec!["hash_lower".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude .md (lowercase input)
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_extensions.insert(".md".to_string());
+    filter.exclude_extensions.insert(".txt".to_string());
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    // All three should be excluded due to case-insensitive matching
+    assert!(filtered.is_empty());
+}
+
+#[test]
+fn test_filter_union_semantics() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "src/main.rs".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_rs".to_string()],
+        },
+    );
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_md".to_string()],
+        },
+    );
+    entries.insert(
+        "docs/guide.yaml".to_string(),
+        FileEntry {
+            mtime_secs: 3000,
+            mtime_nanos: 0,
+            size: 300,
+            blob_hashes: vec!["hash_docs_yaml".to_string()],
+        },
+    );
+    entries.insert(
+        "config/app.yaml".to_string(),
+        FileEntry {
+            mtime_secs: 4000,
+            mtime_nanos: 0,
+            size: 400,
+            blob_hashes: vec!["hash_config_yaml".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude .md + docs/**
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_globs = vec!["docs/**".to_string()];
+    filter.exclude_extensions.insert(".md".to_string());
+    filter.compile_globs().unwrap();
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    // Should exclude:
+    // - README.md (by extension)
+    // - docs/guide.yaml (by glob)
+    // Should include:
+    // - src/main.rs
+    // - config/app.yaml
+    assert_eq!(filtered.len(), 2);
+    assert!(filtered.contains(&"hash_rs".to_string()));
+    assert!(filtered.contains(&"hash_config_yaml".to_string()));
+}
+
+#[test]
+fn test_filter_all_excluded_returns_empty_gracefully() {
+    let mut entries = HashMap::new();
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash1".to_string()],
+        },
+    );
+    entries.insert(
+        "docs/guide.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash2".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // Filter: exclude all
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_document_files = true;
+    filter.exclude_globs = vec!["docs/**".to_string()];
+    for ext in ace_tool::search_filter::DEFAULT_DOCUMENT_EXTENSIONS {
+        filter.exclude_extensions.insert(ext.to_string());
+    }
+    filter.compile_globs().unwrap();
+
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    // Should return empty gracefully, not panic
+    assert!(filtered.is_empty());
+}
+
+#[test]
+fn test_no_filter_params_returns_all_blobs() {
+    use ace_tool::search_filter::SearchFilterOptions;
+
+    // 创建测试索引数据
+    let mut entries = HashMap::new();
+    entries.insert(
+        "src/main.rs".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_rs".to_string()],
+        },
+    );
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_md".to_string()],
+        },
+    );
+    entries.insert(
+        "docs/guide.txt".to_string(),
+        FileEntry {
+            mtime_secs: 3000,
+            mtime_nanos: 0,
+            size: 300,
+            blob_hashes: vec!["hash_txt".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // 无过滤参数
+    let filter = SearchFilterOptions::default();
+
+    // 验证 is_active() 返回 false
+    assert!(!filter.is_active());
+
+    // 验证 get_all_blob_hashes() 返回全部 blob
+    let all_blobs = index.get_all_blob_hashes();
+    assert_eq!(all_blobs.len(), 3);
+
+    // 验证 get_filtered_blob_hashes() 对默认 filter 也返回全部
+    let filtered_blobs = index.get_filtered_blob_hashes(&filter);
+    assert_eq!(filtered_blobs.len(), 3);
+
+    // 两者结果一致（无过滤时行为相同）
+    let mut all_sorted = all_blobs;
+    all_sorted.sort();
+    let mut filtered_sorted = filtered_blobs;
+    filtered_sorted.sort();
+    assert_eq!(all_sorted, filtered_sorted);
+}
+
+#[test]
+fn test_filter_all_excluded_returns_empty_result() {
+    use ace_tool::search_filter::SearchFilterOptions;
+
+    // 创建只有文档文件的索引
+    let mut entries = HashMap::new();
+    entries.insert(
+        "README.md".to_string(),
+        FileEntry {
+            mtime_secs: 1000,
+            mtime_nanos: 0,
+            size: 100,
+            blob_hashes: vec!["hash_md".to_string()],
+        },
+    );
+    entries.insert(
+        "CHANGELOG".to_string(),
+        FileEntry {
+            mtime_secs: 2000,
+            mtime_nanos: 0,
+            size: 200,
+            blob_hashes: vec!["hash_changelog".to_string()],
+        },
+    );
+
+    let index = IndexData {
+        version: 2,
+        config_hash: "hash".to_string(),
+        entries,
+    };
+
+    // 创建排除所有文件的过滤器
+    let mut filter = SearchFilterOptions::default();
+    filter.exclude_document_files = true;
+    for ext in ace_tool::search_filter::DEFAULT_DOCUMENT_EXTENSIONS {
+        filter.exclude_extensions.insert(ext.to_string());
+    }
+    for name in ace_tool::search_filter::DEFAULT_DOCUMENT_FILENAMES {
+        filter.exclude_filenames.insert(name.to_lowercase());
+    }
+
+    // 验证过滤后返回空列表（不 panic）
+    let filtered = index.get_filtered_blob_hashes(&filter);
+    assert!(filtered.is_empty());
+
+    // 验证 is_active() 为 true
+    assert!(filter.is_active());
+}
