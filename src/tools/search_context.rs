@@ -9,6 +9,7 @@ use tracing::{error, info};
 
 use crate::config::Config;
 use crate::index::IndexManager;
+use crate::search_filter::SearchFilterOptions;
 
 /// Tool definition for MCP
 pub struct SearchContextToolDef {
@@ -19,32 +20,27 @@ pub struct SearchContextToolDef {
 /// Static tool definition
 pub static SEARCH_CONTEXT_TOOL: SearchContextToolDef = SearchContextToolDef {
     name: "search_context",
-    description: r#"IMPORTANT: This is the primary tool for searching the codebase. Please consider as the FIRST CHOICE for any codebase searches.
+    description: r#"Semantic code search tool. Use as FIRST CHOICE for codebase searches.
 
-This MCP tool is Augment's context engine, the world's best codebase context engine. It:
-1. Takes in a natural language description of the code you are looking for
-2. Uses a proprietary retrieval/embedding model suite that produces the highest-quality recall of relevant code snippets from across the codebase
-3. Maintains a real-time index of the codebase, so the results are always up-to-date and reflects the current state of the codebase
-4. Can retrieve across different programming languages
-5. Only reflects the current state of the codebase on the disk, and has no information on version control or code history
+Takes natural language queries and returns relevant code snippets using semantic matching. Maintains real-time index of the codebase.
 
 ## When to Use
-- When you don't know which files contain the information you need
-- When you want to gather high level information about the task you are trying to accomplish
-- When you want to gather information about the codebase in general
+- Don't know which files contain the information
+- Gathering high-level information about codebase
+- Looking for implementation of a feature
 
-## Good Query Examples
-- "Where is the function that handles user authentication?"
-- "What tests are there for the login functionality?"
-- "How is the database connected to the application?"
+## Query Examples
+Good: "Where is user authentication handled?" "How is DB connection pool managed?"
+Bad (use grep): "Find definition of class Foo" "Find all references to bar"
 
-## Bad Query Examples (use grep or file view instead)
-- "Find definition of constructor of class Foo" (use grep tool instead)
-- "Find all references to function bar" (use grep tool instead)
-- "Show me how Checkout class is used in services/payment.py" (use file view tool instead)
-- "Show context of the file foo.py" (use file view tool instead)
+## Filtering Options (optional)
+- exclude_document_files (bool): RECOMMENDED DEFAULT. Set to `true` to search source code only, excluding .md, .txt, README, CHANGELOG, etc. Only set to `false` when you specifically need to search documentation.
+- exclude_extensions (array): Exclude extensions, e.g., [".md", ".json"]
+- exclude_globs (array): Exclude glob patterns, e.g., ["docs/**", "**/test*"]
 
-ALWAYS use this tool when you're unsure of exact file locations. Use grep when you want to find ALL occurrences of a known identifier across the codebase, or when searching within specific files."#,
+Filters combine as UNION (OR logic).
+
+Use grep for: exact symbol definitions, all references, specific file content."#,
 };
 
 impl SearchContextToolDef {
@@ -72,6 +68,20 @@ Examples:
 - "Where is the function that handles user authentication?"
 - "What tests are there for the login functionality?"
 - "How is the database connected to the application?""#
+                },
+                "exclude_document_files": {
+                    "type": "boolean",
+                    "description": "If true, exclude document files (.md, .mdx, .txt, .csv, .tsv, .rst, .adoc, .tex, .org) from search. Useful when you want to focus on source code only."
+                },
+                "exclude_extensions": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "File extensions to exclude from search. Include the leading dot, e.g., [\".md\", \".txt\"]. Case-insensitive matching."
+                },
+                "exclude_globs": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Glob patterns to exclude from search. Examples: [\"docs/**\", \"**/README*\", \"test/**\"]. Uses standard glob syntax."
                 }
             },
             "required": ["project_root_path", "query"]
@@ -84,6 +94,12 @@ Examples:
 pub struct SearchContextArgs {
     pub project_root_path: Option<String>,
     pub query: Option<String>,
+    /// Whether to exclude document files (md, txt, csv, etc.) from search
+    pub exclude_document_files: Option<bool>,
+    /// File extensions to exclude (e.g., [".md", ".txt"])
+    pub exclude_extensions: Option<Vec<String>>,
+    /// Glob patterns to exclude (e.g., ["docs/**", "**/README*"])
+    pub exclude_globs: Option<Vec<String>>,
 }
 
 /// Tool result
@@ -142,6 +158,14 @@ impl SearchContextTool {
 
         info!("Executing search_context for: {}", project_root);
 
+        // Build filter options from args
+        let mut filters = SearchFilterOptions::from_args(&args);
+        if let Err(e) = filters.compile_globs() {
+            return ToolResult {
+                text: format!("Error: Invalid glob pattern: {}", e),
+            };
+        }
+
         // Create index manager and execute search
         let manager = match IndexManager::new(self.config.clone(), project_path) {
             Ok(m) => m,
@@ -153,7 +177,7 @@ impl SearchContextTool {
             }
         };
 
-        match manager.search_context(&query).await {
+        match manager.search_context(&query, &filters).await {
             Ok(result) => ToolResult { text: result },
             Err(e) => {
                 error!("Search failed: {}", e);

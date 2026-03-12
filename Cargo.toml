@@ -1,6 +1,6 @@
 [package]
 name = "ace-tool-rs"
-version = "0.1.14"
+version = "0.1.16"
 edition = "2021"
 description = "MCP server for codebase indexing, semantic search, and prompt enhancement"
 license = "GPL-3.0-only OR LicenseRef-Commercial"
@@ -76,6 +76,9 @@ open = "5"
 
 # Date/time for logging
 chrono = "0.4"
+
+# Glob pattern matching for search filtering
+globset = "0.4"
 
 [dev-dependencies]
 # Temporary directories for tests
