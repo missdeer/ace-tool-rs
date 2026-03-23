@@ -57,13 +57,18 @@ fn build_codex_url(base_url: &str) -> String {
     format!("{}/v1/responses", base_url)
 }
 
-/// Build input message with explicit structure
+/// Build input message with role-aware content structure
 fn build_input_message(role: &str, content: &str) -> Value {
+    let content_type = match role {
+        "assistant" => "output_text",
+        _ => "input_text",
+    };
+
     serde_json::json!({
         "type": "message",
         "role": role,
         "content": [{
-            "type": "input_text",
+            "type": content_type,
             "text": content
         }]
     })
@@ -225,6 +230,15 @@ mod tests {
             build_codex_url("https://api.openai.com/v1/"),
             "https://api.openai.com/v1/responses"
         );
+    }
+
+    #[test]
+    fn test_build_input_message_uses_output_text_for_assistant_role() {
+        let assistant_message = build_input_message("assistant", "Hello");
+        assert_eq!(assistant_message["content"][0]["type"], "output_text");
+
+        let user_message = build_input_message("user", "Hello");
+        assert_eq!(user_message["content"][0]["type"], "input_text");
     }
 
     #[test]

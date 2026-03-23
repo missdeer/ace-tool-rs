@@ -2,15 +2,18 @@
 //! Uses wiremock to mock HTTP responses
 
 use ace_tool::service::{
-    call_claude_endpoint, call_gemini_endpoint, call_openai_endpoint, ThirdPartyConfig,
+    call_claude_endpoint, call_codex_endpoint, call_gemini_endpoint, call_openai_endpoint,
+    ThirdPartyConfig,
 };
 use reqwest::Client;
+use serde_json::Value;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn create_test_client() -> Client {
     Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
         .build()
         .unwrap()
 }
@@ -1003,4 +1006,55 @@ async fn test_gemini_api_invalid_json_response() {
         .unwrap_err()
         .to_string()
         .contains("Failed to parse Gemini response"));
+}
+
+// ============================================================================
+// Codex API Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_codex_api_uses_output_text_for_assistant_history() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(|request: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let input = body["input"].as_array().unwrap();
+
+            assert_eq!(input[0]["role"], "user");
+            assert_eq!(input[0]["content"][0]["type"], "input_text");
+            assert_eq!(input[1]["role"], "assistant");
+            assert_eq!(input[1]["content"][0]["type"], "output_text");
+            assert_eq!(input[2]["role"], "user");
+            assert_eq!(input[2]["content"][0]["type"], "input_text");
+
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "output": [{
+                    "type": "message",
+                    "phase": "final_answer",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "<augment-enhanced-prompt>Enhanced prompt for testing</augment-enhanced-prompt>"
+                    }]
+                }]
+            }))
+        })
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = create_test_client();
+    let config = ThirdPartyConfig {
+        base_url: mock_server.uri(),
+        token: "test-token".to_string(),
+        model: "gpt-5.3-codex".to_string(),
+    };
+
+    let history = "User: Check the startup flow.
+Assistant: OK, I will inspect it.";
+    let result = call_codex_endpoint(&client, &config, "Test prompt", history).await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "Enhanced prompt for testing");
 }
