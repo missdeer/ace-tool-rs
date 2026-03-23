@@ -163,13 +163,14 @@ For OpenCode or similar agent-style clients, the smoothest setup is usually to d
         "ace-tool-rs",
         "--base-url", "https://api.example.com",
         "--token", "your-token-here",
-        "--transport", "lsp",
         "--no-webbrowser-enhance-prompt"
       ]
     }
   }
 }
 ```
+
+`--transport lsp` can still be added if your MCP client specifically requires LSP framing, but many clients can use the default `auto` mode.
 
 Recommended workflow in OpenCode:
 

@@ -32,6 +32,14 @@ fn test_enhance_prompt_tool_description_mentions_language_detection() {
     assert!(desc.contains("Chinese") || desc.contains("language"));
 }
 
+
+#[test]
+fn test_enhance_prompt_tool_description_mentions_post_call_behavior() {
+    let desc = ENHANCE_PROMPT_TOOL.description;
+    assert!(desc.contains("continue fulfilling the user's original request"));
+    assert!(desc.contains("Do NOT stop after displaying or quoting the enhanced prompt"));
+}
+
 // ============================================================================
 // Input Schema Tests
 // ============================================================================

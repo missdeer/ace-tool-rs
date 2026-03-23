@@ -28,6 +28,12 @@ IMPORTANT: Use this tool ONLY when:
 
 DO NOT use for general optimization requests like "optimize this code" or "improve this function" - those are code optimization requests, not prompt enhancement.
 
+IMPORTANT AFTER THE TOOL RETURNS:
+- Treat the returned text as a refined version of the user's instructions.
+- You MUST continue fulfilling the user's original request using that enhanced prompt.
+- Do NOT stop after displaying or quoting the enhanced prompt.
+- Unless the user explicitly asked only for prompt rewriting, proceed with implementation or the next task step.
+
 Features:
 - Automatic language detection (Chinese input → Chinese output, English input → English output)
 - Uses codebase context from indexed files

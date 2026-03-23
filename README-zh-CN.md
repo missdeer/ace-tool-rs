@@ -163,13 +163,14 @@ startup_timeout_ms = 60000
         "ace-tool-rs",
         "--base-url", "https://api.example.com",
         "--token", "your-token-here",
-        "--transport", "lsp",
         "--no-webbrowser-enhance-prompt"
       ]
     }
   }
 }
 ```
+
+如果你的 MCP 客户端明确要求 LSP 帧格式，也可以额外加上 `--transport lsp`；否则很多客户端直接使用默认的 `auto` 模式即可。
 
 推荐在 OpenCode 中这样使用：
 
