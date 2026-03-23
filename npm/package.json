@@ -1,6 +1,6 @@
 {
   "name": "ace-tool-rs",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "description": "MCP server for codebase indexing, semantic search, and prompt enhancement",
   "repository": {
