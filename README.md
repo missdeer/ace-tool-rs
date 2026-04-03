@@ -97,6 +97,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `PROMPT_ENHANCER_BASE_URL` | Base URL for third-party API (required for `claude`/`openai`/`gemini`/`codex`) |
 | `PROMPT_ENHANCER_TOKEN` | API key for third-party API (required for `claude`/`openai`/`gemini`/`codex`) |
 | `PROMPT_ENHANCER_MODEL` | Model name override for third-party API (optional) |
+| `PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT` | When set to `1`, `true`, `yes`, or `on`, runs `search_context` before third-party prompt enhancement and injects the retrieval result into the enhancement input |
 
 ### Example
 
@@ -288,6 +289,14 @@ export PROMPT_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --enhance-prompt "Add user authentication"
+
+# If you also want to inject search_context before third-party enhancement,
+# you must additionally provide ACE search credentials via --base-url/--token
+export PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT=1
+ace-tool-rs \
+  --base-url https://api.example.com \
+  --token your-ace-token \
+  --enhance-prompt "Add user authentication"
 ```
 
 **Example using Codex API:**
@@ -300,6 +309,14 @@ export PROMPT_ENHANCER_TOKEN=your-openai-api-key
 # Optional: export PROMPT_ENHANCER_MODEL=codex-mini
 ace-tool-rs --enhance-prompt "Refactor authentication logic"
 ```
+
+**Using `search_context` with third-party enhancement:**
+
+- Applies only to `claude` / `openai` / `gemini` / `codex`
+- Requires `PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT=1`
+- In MCP server mode, `--base-url` and `--token` are already required
+- In one-shot `--enhance-prompt` mode, enabling this feature also requires `--base-url` and `--token`
+- When explicitly enabled, search failures are returned as real errors instead of silently falling back to plain enhancement
 
 ## Supported File Types
 
