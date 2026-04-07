@@ -498,6 +498,17 @@ mod tests {
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
+    fn block_on<F>(future: F) -> F::Output
+    where
+        F: std::future::Future,
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future)
+    }
+
     #[test]
     fn test_should_include_search_context_env_values() {
         let _guard = ENV_MUTEX.lock().unwrap();
@@ -556,16 +567,20 @@ mod tests {
         assert!(result.contains("truncated for length"));
     }
 
-    #[tokio::test]
-    async fn test_maybe_inject_search_context_skips_for_non_third_party() {
+    #[test]
+    fn test_maybe_inject_search_context_skips_for_non_third_party() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let original = std::env::var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT).ok();
         std::env::set_var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT, "1");
 
         let config = Config::new_for_third_party_enhancer();
-        let result = maybe_inject_search_context(&config, EnhancerEndpoint::New, "test", None)
-            .await
-            .unwrap();
+        let result = block_on(maybe_inject_search_context(
+            &config,
+            EnhancerEndpoint::New,
+            "test",
+            None,
+        ))
+        .unwrap();
         assert_eq!(result, "test");
 
         match original {
@@ -574,8 +589,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_maybe_inject_search_context_requires_project_root() {
+    #[test]
+    fn test_maybe_inject_search_context_requires_project_root() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let original = std::env::var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT).ok();
         std::env::set_var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT, "1");
@@ -587,9 +602,13 @@ mod tests {
         )
         .unwrap();
 
-        let err = maybe_inject_search_context(&config, EnhancerEndpoint::Claude, "test", None)
-            .await
-            .unwrap_err();
+        let err = block_on(maybe_inject_search_context(
+            &config,
+            EnhancerEndpoint::Claude,
+            "test",
+            None,
+        ))
+        .unwrap_err();
         assert!(err.to_string().contains("requires project_root"));
 
         match original {
@@ -598,21 +617,20 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_maybe_inject_search_context_requires_search_config() {
+    #[test]
+    fn test_maybe_inject_search_context_requires_search_config() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let original = std::env::var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT).ok();
         std::env::set_var(ENV_ENHANCER_INCLUDE_SEARCH_CONTEXT, "1");
 
         let config = Config::new_for_third_party_enhancer();
         let temp_dir = tempdir().unwrap();
-        let err = maybe_inject_search_context(
+        let err = block_on(maybe_inject_search_context(
             &config,
             EnhancerEndpoint::Claude,
             "test",
             Some(temp_dir.path()),
-        )
-        .await
+        ))
         .unwrap_err();
         assert!(err
             .to_string()
