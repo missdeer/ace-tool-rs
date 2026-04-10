@@ -97,6 +97,7 @@ ace-tool-rs --base-url <API_URL> --token <AUTH_TOKEN>
 | `PROMPT_ENHANCER_BASE_URL` | 第三方 API 的基础 URL（`claude`/`openai`/`gemini`/`codex` 必需） |
 | `PROMPT_ENHANCER_TOKEN` | 第三方 API 的密钥（`claude`/`openai`/`gemini`/`codex` 必需） |
 | `PROMPT_ENHANCER_MODEL` | 第三方 API 的模型名称覆盖（可选） |
+| `PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT` | 设为 `1`、`true`、`yes` 或 `on` 时，在第三方提示词增强前先执行一次 `search_context`，将检索结果注入增强输入 |
 
 ### 示例
 
@@ -288,6 +289,14 @@ export PROMPT_ENHANCER_ENDPOINT=claude
 export PROMPT_ENHANCER_BASE_URL=https://api.anthropic.com
 export PROMPT_ENHANCER_TOKEN=your-anthropic-api-key
 ace-tool-rs --enhance-prompt "添加用户认证功能"
+
+# 如果还想在第三方增强前注入 search_context，
+# 需要同时提供 ACE 检索用的 --base-url 和 --token
+export PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT=1
+ace-tool-rs \
+  --base-url https://api.example.com \
+  --token your-ace-token \
+  --enhance-prompt "添加用户认证功能"
 ```
 
 **使用 Codex API 的示例：**
@@ -300,6 +309,14 @@ export PROMPT_ENHANCER_TOKEN=your-openai-api-key
 # 可选: export PROMPT_ENHANCER_MODEL=codex-mini
 ace-tool-rs --enhance-prompt "重构认证逻辑"
 ```
+
+**第三方增强结合 `search_context` 的说明：**
+
+- 仅对 `claude` / `openai` / `gemini` / `codex` 生效
+- 需要设置 `PROMPT_ENHANCER_INCLUDE_SEARCH_CONTEXT=1`
+- 在 MCP 服务模式下，本来就需要 `--base-url` 和 `--token`
+- 在 `--enhance-prompt` 单次模式下，如果启用了这个开关，也必须额外提供 `--base-url` 和 `--token`
+- 若显式启用但检索失败，工具会返回真实错误，不会静默退回普通增强
 
 ## 支持的文件类型
 
