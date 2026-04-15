@@ -40,9 +40,7 @@ struct ClaudeContent {
 }
 
 fn build_claude_url(base_url: &str) -> String {
-    let base_url = base_url.trim_end_matches('/');
-    let base_url = base_url.strip_suffix("/v1").unwrap_or(base_url);
-    format!("{}/v1/messages", base_url)
+    super::common::build_api_url(base_url, "/v1/messages")
 }
 
 /// Call Claude API endpoint
@@ -149,6 +147,15 @@ mod tests {
         assert_eq!(
             build_claude_url("https://api.anthropic.com/v1/"),
             "https://api.anthropic.com/v1/messages"
+        );
+        // Cross-version: base has v1beta, path's /v1 stripped
+        assert_eq!(
+            build_claude_url("https://proxy.example.com/v1beta"),
+            "https://proxy.example.com/v1beta/messages"
+        );
+        assert_eq!(
+            build_claude_url("https://proxy.example.com/v2"),
+            "https://proxy.example.com/v2/messages"
         );
     }
 }

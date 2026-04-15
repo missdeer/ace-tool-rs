@@ -43,9 +43,7 @@ struct OpenAIResponseMessage {
 }
 
 fn build_openai_url(base_url: &str) -> String {
-    let base_url = base_url.trim_end_matches('/');
-    let base_url = base_url.strip_suffix("/v1").unwrap_or(base_url);
-    format!("{}/v1/chat/completions", base_url)
+    super::common::build_api_url(base_url, "/v1/chat/completions")
 }
 
 /// Call OpenAI API endpoint
@@ -145,6 +143,14 @@ mod tests {
         assert_eq!(
             build_openai_url("https://api.openai.com/v1/"),
             "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://proxy.example.com/v1beta"),
+            "https://proxy.example.com/v1beta/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://proxy.example.com/v2"),
+            "https://proxy.example.com/v2/chat/completions"
         );
     }
 }

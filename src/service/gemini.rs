@@ -59,9 +59,8 @@ struct GeminiResponsePart {
 }
 
 fn build_gemini_url(base_url: &str, model: &str) -> String {
-    let base_url = base_url.trim_end_matches('/');
-    let base_url = base_url.strip_suffix("/v1beta").unwrap_or(base_url);
-    format!("{}/v1beta/models/{}:generateContent", base_url, model)
+    let path = format!("/v1beta/models/{}:generateContent", model);
+    super::common::build_api_url(base_url, &path)
 }
 
 /// Call Gemini API endpoint
@@ -176,6 +175,14 @@ mod tests {
                 "gemini-pro"
             ),
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+        );
+        assert_eq!(
+            build_gemini_url("https://proxy.example.com/v1", "gemini-pro"),
+            "https://proxy.example.com/v1/models/gemini-pro:generateContent"
+        );
+        assert_eq!(
+            build_gemini_url("https://proxy.example.com/v2", "gemini-pro"),
+            "https://proxy.example.com/v2/models/gemini-pro:generateContent"
         );
     }
 }

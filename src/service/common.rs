@@ -289,6 +289,51 @@ pub fn build_third_party_prompt(original_prompt: &str) -> Result<String> {
     Ok(format!("{}{}", enhanced_prompt, language_hint))
 }
 
+/// Build API URL by joining base URL with a resource path, deduplicating version segments.
+///
+/// If `base_url` already ends with a version prefix (e.g. `/v1`, `/v1beta`),
+/// and `path` also starts with one, the path's version prefix is stripped
+/// to avoid duplication like `/v1/v1/messages`.
+///
+/// Examples:
+/// - `("https://api.example.com", "/v1/messages")` → `https://api.example.com/v1/messages`
+/// - `("https://api.example.com/v1", "/v1/messages")` → `https://api.example.com/v1/messages`
+/// - `("https://proxy.com/v1beta", "/v1/messages")` → `https://proxy.com/v1beta/messages`
+pub fn build_api_url(base_url: &str, path: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    if has_version_suffix(base) {
+        let path = strip_version_prefix(path);
+        format!("{}{}", base, path)
+    } else {
+        format!("{}{}", base, path)
+    }
+}
+
+fn has_version_suffix(url: &str) -> bool {
+    if let Some(pos) = url.rfind("/v") {
+        url[pos + 2..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    } else {
+        false
+    }
+}
+
+fn strip_version_prefix(path: &str) -> &str {
+    let p = path.strip_prefix('/').unwrap_or(path);
+    if let Some(rest) = p.strip_prefix('v') {
+        if rest.starts_with(|c: char| c.is_ascii_digit()) {
+            // Find end of version segment (next '/' or end of string)
+            if let Some(slash) = rest.find('/') {
+                return &rest[slash..];
+            }
+            return "";
+        }
+    }
+    path
+}
+
 /// Map common authentication errors to consistent error messages
 pub fn map_auth_error(status: u16, provider: &str) -> Option<anyhow::Error> {
     match status {
@@ -312,4 +357,64 @@ pub mod lazy_static {
         };
     }
     pub use lazy_static;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_api_url_no_version_in_base() {
+        assert_eq!(
+            build_api_url("https://api.example.com", "/v1/messages"),
+            "https://api.example.com/v1/messages"
+        );
+        assert_eq!(
+            build_api_url("https://api.example.com/", "/v1/messages"),
+            "https://api.example.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_same_version_dedup() {
+        assert_eq!(
+            build_api_url("https://api.example.com/v1", "/v1/messages"),
+            "https://api.example.com/v1/messages"
+        );
+        assert_eq!(
+            build_api_url("https://api.example.com/v1/", "/v1/messages"),
+            "https://api.example.com/v1/messages"
+        );
+        assert_eq!(
+            build_api_url("https://api.example.com/v1beta", "/v1beta/models/x:gen"),
+            "https://api.example.com/v1beta/models/x:gen"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_cross_version_dedup() {
+        // base has v1beta, path has v1 → keep v1beta, strip v1
+        assert_eq!(
+            build_api_url("https://proxy.example.com/v1beta", "/v1/messages"),
+            "https://proxy.example.com/v1beta/messages"
+        );
+        // base has v2, path has v1 → keep v2, strip v1
+        assert_eq!(
+            build_api_url("https://proxy.example.com/v2", "/v1/chat/completions"),
+            "https://proxy.example.com/v2/chat/completions"
+        );
+        // base has v1, path has v1beta → keep v1, strip v1beta
+        assert_eq!(
+            build_api_url("https://proxy.example.com/v1", "/v1beta/models/x:gen"),
+            "https://proxy.example.com/v1/models/x:gen"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_non_version_path_preserved() {
+        assert_eq!(
+            build_api_url("https://api.example.com/vertex", "/v1/messages"),
+            "https://api.example.com/vertex/v1/messages"
+        );
+    }
 }

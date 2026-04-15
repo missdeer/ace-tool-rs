@@ -15,10 +15,10 @@ pub use augment::{
 pub use claude::call_claude_endpoint;
 pub use codex::call_codex_endpoint;
 pub use common::{
-    extract_enhanced_prompt, get_third_party_config, is_chinese_text, parse_chat_history,
-    render_enhance_prompt, replace_tool_names, ChatMessage, EnhancerEndpoint, ThirdPartyConfig,
-    DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL,
-    ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN,
+    build_api_url, extract_enhanced_prompt, get_third_party_config, is_chinese_text,
+    parse_chat_history, render_enhance_prompt, replace_tool_names, ChatMessage, EnhancerEndpoint,
+    ThirdPartyConfig, DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, DEFAULT_GEMINI_MODEL,
+    DEFAULT_OPENAI_MODEL, ENV_ENHANCER_BASE_URL, ENV_ENHANCER_MODEL, ENV_ENHANCER_TOKEN,
 };
 pub use gemini::call_gemini_endpoint;
 pub use openai::call_openai_endpoint;
