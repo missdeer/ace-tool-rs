@@ -21,6 +21,7 @@ enum TransportArg {
 #[derive(Parser, Debug)]
 #[command(name = "ace-tool")]
 #[command(about = "MCP server for codebase indexing and semantic search")]
+#[command(version)]
 struct Args {
     /// API base URL for the indexing service
     #[arg(long)]

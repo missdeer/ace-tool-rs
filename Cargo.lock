@@ -13,6 +13,7 @@ dependencies = [
  "encoding_rs",
  "encoding_rs_io",
  "futures",
+ "globset",
  "hex",
  "http-body-util",
  "hyper",

@@ -22,6 +22,7 @@ use walkdir::WalkDir;
 
 use crate::config::Config;
 use crate::http_logger::{self, HttpRequestLog, HttpResponseLog};
+use crate::search_filter::SearchFilterOptions;
 use crate::strategy::{AdaptiveStrategy, ErrorType};
 use crate::utils::path_normalizer::{normalize_path, normalize_relative_path, RuntimeEnv};
 use crate::utils::project_detector::get_index_file_path;
@@ -75,6 +76,15 @@ impl IndexData {
         self.entries
             .values()
             .flat_map(|e| e.blob_hashes.iter().cloned())
+            .collect()
+    }
+
+    /// Get blob hashes from entries that pass the filter
+    pub fn get_filtered_blob_hashes(&self, filter: &SearchFilterOptions) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|(rel_path, _)| !filter.should_exclude(rel_path))
+            .flat_map(|(_, entry)| entry.blob_hashes.iter().cloned())
             .collect()
     }
 }
@@ -1244,7 +1254,12 @@ impl IndexManager {
     }
 
     /// Search code context
-    pub async fn search_context(&self, query: &str) -> Result<String> {
+    /// Execute a search with optional filtering
+    pub async fn search_context(
+        &self,
+        query: &str,
+        filters: &SearchFilterOptions,
+    ) -> Result<String> {
         info!("Starting search: {}", query);
 
         // Auto-index first
@@ -1261,9 +1276,26 @@ impl IndexManager {
 
         // Load index
         let index_data = self.load_index();
-        let blob_names = index_data.get_all_blob_hashes();
+
+        // Apply filters and get blob hashes
+        let blob_names = if filters.is_active() {
+            let mut prepared_filters = filters.clone();
+            prepared_filters
+                .ensure_compiled_globs()
+                .map_err(|e| anyhow!("Failed to compile glob patterns: {}", e))?;
+            index_data.get_filtered_blob_hashes(&prepared_filters)
+        } else {
+            index_data.get_all_blob_hashes()
+        };
+
         if blob_names.is_empty() {
-            return Err(anyhow!("No blobs found after indexing"));
+            if filters.is_active() {
+                // 过滤后为空：返回空结果，而非错误
+                info!("All blobs excluded by filter criteria");
+                return Ok("No matching files found after applying filter criteria.".to_string());
+            } else {
+                return Err(anyhow!("No blobs found after indexing"));
+            }
         }
 
         // Execute search

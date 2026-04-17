@@ -77,6 +77,9 @@ open = "5"
 # Date/time for logging
 chrono = "0.4"
 
+# Glob pattern matching for search filtering
+globset = "0.4"
+
 [dev-dependencies]
 # Temporary directories for tests
 tempfile = "3"
