@@ -4,6 +4,7 @@ use ace_tool::config::{Config, ConfigOptions};
 use ace_tool::enhancer::prompt_enhancer::{get_enhancer_endpoint, PromptEnhancer};
 use ace_tool::index::IndexManager;
 use ace_tool::mcp::{McpServer, TransportMode};
+use ace_tool::search_filter::SearchFilterOptions;
 use ace_tool::service::get_third_party_config;
 use anyhow::{anyhow, Result};
 use clap::{Parser, ValueEnum};
@@ -78,6 +79,10 @@ struct Args {
     /// Enhance a prompt and output the result to stdout, then exit
     #[arg(long)]
     enhance_prompt: Option<String>,
+
+    /// Search the codebase using a natural language query and exit
+    #[arg(long)]
+    search: Option<String>,
 }
 
 #[tokio::main]
@@ -89,6 +94,46 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+
+    // Search mode: execute semantic search and output to stdout
+    if let Some(ref query) = args.search {
+        info!("Search mode: executing semantic search");
+        let project_root = env::current_dir()?;
+        info!("Project root: {:?}", project_root);
+
+        // For search, base_url and token are required
+        let base_url = args
+            .base_url
+            .clone()
+            .ok_or_else(|| anyhow!("--base-url is required for search"))?;
+        let token = args
+            .token
+            .clone()
+            .ok_or_else(|| anyhow!("--token is required for search"))?;
+
+        let config = Config::new(
+            base_url,
+            token,
+            ConfigOptions {
+                max_lines_per_blob: args.max_lines_per_blob,
+                upload_timeout: args.upload_timeout,
+                upload_concurrency: args.upload_concurrency,
+                retrieval_timeout: args.retrieval_timeout,
+                no_adaptive: args.no_adaptive,
+                no_webbrowser_enhance_prompt: args.no_webbrowser_enhance_prompt,
+                force_xdg_open: args.force_xdg_open,
+                webui_addr: args.webui_addr.clone(),
+            },
+        )?;
+
+        let manager = IndexManager::new(config, project_root)?;
+        let mut filters = SearchFilterOptions::default();
+        filters.compile_globs()?;
+
+        let result = manager.search_context(query, &filters).await?;
+        println!("{}", result);
+        return Ok(());
+    }
 
     // Enhance-prompt mode: enhance the prompt and output to stdout
     if let Some(ref prompt) = args.enhance_prompt {
